@@ -1,0 +1,54 @@
+# Page snapshot
+
+```yaml
+- complementary:
+  - link "Silver Fin Market Intelligence":
+    - /url: /dashboard
+    - heading "Silver Fin" [level=1]
+    - paragraph: Market Intelligence
+  - navigation:
+    - link "Dashboard":
+      - /url: /dashboard
+    - link "Feeds New":
+      - /url: /feeds
+    - link "Analysis":
+      - /url: /analysis
+    - link "Insights":
+      - /url: /insights
+  - link "Settings":
+    - /url: /settings
+  - link "Help":
+    - /url: /help
+  - button "Logout"
+  - button "Collapse"
+- banner:
+  - textbox "Search anything..."
+  - text: K
+  - button
+  - button
+  - button
+  - button
+- main:
+  - heading "Feed Management" [level=1]
+  - paragraph: Monitor and manage your data sources
+  - button "Refresh All"
+  - button "Generate Predictions"
+  - button "Add Feed"
+  - paragraph: Total Feeds
+  - paragraph: "20"
+  - paragraph: Queue Processing
+  - paragraph: "50"
+  - paragraph: Queue Pending
+  - paragraph: "0"
+  - paragraph: Queue Completed
+  - paragraph: "647"
+  - searchbox "Search feeds...": Bloomberg
+  - button
+  - button
+  - button "rss"
+  - button "podcast"
+  - button "youtube"
+  - button "api"
+- button "Open Tanstack query devtools":
+  - img
+```

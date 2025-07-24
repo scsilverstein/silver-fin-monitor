@@ -1,0 +1,94 @@
+# Page snapshot
+
+```yaml
+- complementary:
+  - link "Silver Fin Market Intelligence":
+    - /url: /dashboard
+    - heading "Silver Fin" [level=1]
+    - paragraph: Market Intelligence
+  - navigation:
+    - link "Dashboard":
+      - /url: /dashboard
+    - link "Feeds New":
+      - /url: /feeds
+    - link "Analysis":
+      - /url: /analysis
+    - link "Insights":
+      - /url: /insights
+  - link "Settings":
+    - /url: /settings
+  - link "Help":
+    - /url: /help
+  - button "Logout"
+  - button "Collapse"
+- banner:
+  - textbox "Search anything..."
+  - text: K
+  - button
+  - button
+  - button
+  - button
+- main:
+  - heading "Market Intelligence Dashboard" [level=1]
+  - paragraph: Real-time insights powered by AI analysis
+  - button "Refresh"
+  - button "Generate Report"
+  - paragraph: Market Sentiment
+  - paragraph: Neutral
+  - text: ↓ 0%
+  - paragraph: "Confidence: 75.0%"
+  - paragraph: Active Feeds
+  - paragraph: "10"
+  - text: ↓ 0%
+  - paragraph: 10 total sources
+  - paragraph: Recent Content
+  - paragraph: "134"
+  - text: ↓ 0%
+  - paragraph: Last 24 hours
+  - paragraph: Queue Status
+  - paragraph: "0"
+  - text: ↓ 0%
+  - paragraph: 0 pending
+  - heading "Market Sentiment Analysis" [level=3]
+  - text: Live 7D
+  - heading "Sentiment History" [level=3]
+  - list:
+    - listitem:
+      - img "Confidence % legend icon"
+      - text: Confidence %
+    - listitem:
+      - img "Sentiment legend icon"
+      - text: Sentiment
+  - application
+  - heading "Recent Activity" [level=3]
+  - paragraph: Daily Analysis Completed
+  - paragraph: Processed 847 articles from 24 sources
+  - text: 2 hours ago
+  - paragraph: Prediction Verified
+  - paragraph: Tech sector rally prediction was 92% accurate
+  - text: 5 hours ago
+  - paragraph: New Feed Added
+  - paragraph: Bloomberg Surveillance podcast connected
+  - text: Yesterday
+  - heading "Active Predictions" [level=3]
+  - text: "3"
+  - heading "Tech sector rally expected to continue with 15-20% gains over the next quarter, driven by AI adoption and strong earnings." [level=4]
+  - text: "Confidence: 72% • 3 months"
+  - heading "Energy markets likely to remain stable with oil prices trading in $70-85 range through year-end." [level=4]
+  - text: "Confidence: 68% • 6 months"
+  - heading "Current geopolitical tensions expected to ease gradually, supporting risk-on sentiment in markets." [level=4]
+  - text: "Confidence: 65% • 1 month"
+  - button "View All Predictions"
+  - heading "Quick Actions" [level=3]
+  - heading "Generate Analysis" [level=3]
+  - paragraph: Create a new market analysis report
+  - text: Generate →
+  - heading "View Predictions" [level=3]
+  - paragraph: Review all active predictions
+  - text: View All →
+  - heading "Manage Feeds" [level=3]
+  - paragraph: Configure your data sources
+  - text: Manage →
+- button "Open Tanstack query devtools":
+  - img
+```

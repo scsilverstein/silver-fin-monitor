@@ -1,0 +1,66 @@
+# Netlify Configuration for Silver Fin Monitor
+
+# Build settings
+[build]
+  # Directory to change to before starting a build
+  base = "/"
+  
+  # Build command - use custom build script
+  command = "./scripts/netlify-build.sh"
+  
+  # Directory that contains the deploy-ready files
+  publish = "frontend/dist"
+  
+  # Directory for serverless functions
+  functions = "netlify/functions"
+
+# Build environment variables
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_VERSION = "10"
+
+# Headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+
+# API proxy redirects
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# SPA redirect for React Router
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Environment variable configuration
+[context.production.environment]
+  VITE_API_URL = "/.netlify/functions/api"
+  VITE_SUPABASE_URL = "https://pnjtzwqieqcrchhjouaz.supabase.co"
+  VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBuanR6d3FpZXFjcmNoaGpvdWF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI4NjQ3MTksImV4cCI6MjA2ODQ0MDcxOX0.SHaa8zOiHm6rJfmRS2XUQT_Rq_kkyihvL0a4GPGCLPg"
+
+[context.deploy-preview.environment]
+  VITE_API_URL = "/.netlify/functions/api"
+  
+[context.branch-deploy.environment]
+  VITE_API_URL = "/.netlify/functions/api"
+
+# Function configuration
+[functions]
+  # Directory for serverless functions
+  directory = "netlify/functions"
+  
+  # Node.js version for functions
+  node_bundler = "esbuild"
+  
+# Plugins
+[[plugins]]
+  package = "@netlify/plugin-functions-install-core"
