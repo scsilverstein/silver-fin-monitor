@@ -96,6 +96,10 @@ const QueueItem: React.FC<QueueItemProps> = ({ job, onDelete, onRetry, onCancel 
   };
 
   const getJobTypeDisplayName = (jobType: string) => {
+    if (!jobType) {
+      return 'Unknown Job Type';
+    }
+    
     switch (jobType) {
       case 'feed_fetch':
         return 'Feed Fetch';

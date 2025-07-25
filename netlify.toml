@@ -43,15 +43,15 @@
 
 # Environment variable configuration
 [context.production.environment]
-  VITE_API_URL = "/.netlify/functions/api"
+  VITE_API_URL = "/api/v1"
   VITE_SUPABASE_URL = "https://pnjtzwqieqcrchhjouaz.supabase.co"
   VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBuanR6d3FpZXFjcmNoaGpvdWF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI4NjQ3MTksImV4cCI6MjA2ODQ0MDcxOX0.SHaa8zOiHm6rJfmRS2XUQT_Rq_kkyihvL0a4GPGCLPg"
 
 [context.deploy-preview.environment]
-  VITE_API_URL = "/.netlify/functions/api"
+  VITE_API_URL = "/api/v1"
   
 [context.branch-deploy.environment]
-  VITE_API_URL = "/.netlify/functions/api"
+  VITE_API_URL = "/api/v1"
 
 # Function configuration
 [functions]

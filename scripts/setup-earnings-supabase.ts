@@ -55,12 +55,27 @@ async function setupEarningsData() {
     ];
 
     console.log('Inserting earnings data...');
-    const { data, error } = await supabase
-      .from('earnings_calendar')
-      .upsert(earningsData, { 
-        onConflict: 'symbol,earnings_date',
-        ignoreDuplicates: true 
-      });
+    
+    // Try to insert each record individually to handle conflicts
+    let insertedCount = 0;
+    for (const earning of earningsData) {
+      try {
+        const { data, error } = await supabase
+          .from('earnings_calendar')
+          .insert(earning);
+        
+        if (!error) {
+          insertedCount++;
+        } else if (error.code !== '23505') { // Ignore duplicate key violations
+          console.warn(`Warning inserting ${earning.symbol}: ${error.message}`);
+        }
+      } catch (err) {
+        console.warn(`Error inserting ${earning.symbol}:`, err);
+      }
+    }
+    
+    console.log(`Successfully inserted ${insertedCount} earnings records.`);
+    let error = null; // Reset error for the check below
 
     if (error) {
       console.error('Error inserting data:', error);

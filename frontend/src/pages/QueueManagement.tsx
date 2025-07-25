@@ -39,8 +39,8 @@ const QueueManagement: React.FC = () => {
 
   // Create stats for the queue
   const queueStats = queueData.stats ? [
-    createStatItems.count('pending', 'Pending Jobs', queueData.stats.pending, {
-      status: queueData.stats.pending > 100 ? 'warning' : 'default',
+    createStatItems.count('pending', 'Pending Jobs', queueData.stats?.pending || 0, {
+      status: (queueData.stats?.pending || 0) > 100 ? 'warning' : 'default',
       clickable: true,
       onClick: () => clientFilters.setStatusFilter('pending')
     }),

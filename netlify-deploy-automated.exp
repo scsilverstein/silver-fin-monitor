@@ -1,0 +1,33 @@
+#\!/usr/bin/expect -f
+
+set timeout 30
+
+spawn bash -c "source ~/.nvm/nvm.sh && nvm use 18 && netlify deploy --dir frontend/dist --prod"
+
+# Wait for "What would you like to do?"
+expect {
+    "What would you like to do?" {
+        sleep 1
+        send "\033\[B\r"
+    }
+}
+
+# Wait for "Team:"
+expect {
+    "Team:" {
+        sleep 1
+        send "\r"
+    }
+}
+
+# Wait for site name or other prompts
+expect {
+    "Site name" {
+        send "silver-fin-monitor-prod\r"
+    }
+    "Your unique site" {
+        send "\r"
+    }
+}
+
+expect eof

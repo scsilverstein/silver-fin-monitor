@@ -22,42 +22,42 @@ export const QueueStatsEnhanced: React.FC<QueueStatsEnhancedProps> = ({
   const statCards = [
     {
       label: 'Total Jobs',
-      value: stats.total,
+      value: stats?.total || 0,
       icon: <BarChart3 className="w-5 h-5 text-blue-500" />,
       color: 'text-blue-600',
       status: 'all'
     },
     {
       label: 'Pending',
-      value: stats.pending,
+      value: stats?.pending || 0,
       icon: <Clock className="w-5 h-5 text-blue-500" />,
       color: 'text-blue-600',
       status: 'pending'
     },
     {
       label: 'Processing',
-      value: stats.processing,
+      value: stats?.processing || 0,
       icon: <Play className="w-5 h-5 text-yellow-500" />,
       color: 'text-yellow-600',
       status: 'processing'
     },
     {
       label: 'Completed',
-      value: stats.completed,
+      value: stats?.completed || 0,
       icon: <CheckCircle className="w-5 h-5 text-green-500" />,
       color: 'text-green-600',
       status: 'completed'
     },
     {
       label: 'Failed',
-      value: stats.failed,
+      value: stats?.failed || 0,
       icon: <XCircle className="w-5 h-5 text-red-500" />,
       color: 'text-red-600',
       status: 'failed'
     },
     {
       label: 'Retrying',
-      value: stats.retry,
+      value: stats?.retry || 0,
       icon: <RefreshCw className="w-5 h-5 text-orange-500" />,
       color: 'text-orange-600',
       status: 'retry'
@@ -94,7 +94,7 @@ export const QueueStatsEnhanced: React.FC<QueueStatsEnhancedProps> = ({
         <CardContent className="p-4">
           <div className="text-center">
             <div className="text-2xl font-bold text-purple-600">
-              {stats.averagePriority.toFixed(1)}
+              {(stats?.averagePriority || 0).toFixed(1)}
             </div>
             <p className="text-xs text-muted-foreground">
               Avg Priority

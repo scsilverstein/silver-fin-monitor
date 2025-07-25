@@ -14,7 +14,7 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ stats }) => {
         <CardTitle>System Status</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {stats && (
+        {stats && stats.queue && stats.transcription && (
           <>
             {/* Queue Status */}
             <div>
@@ -23,25 +23,25 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ stats }) => {
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Processing:</span>
                   <ModernBadge variant="warning" size="sm">
-                    {stats.queue.processing}
+                    {stats.queue.processing || 0}
                   </ModernBadge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Pending:</span>
                   <ModernBadge variant="secondary" size="sm">
-                    {stats.queue.pending}
+                    {stats.queue.pending || 0}
                   </ModernBadge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Completed:</span>
                   <ModernBadge variant="success" size="sm">
-                    {stats.queue.completed}
+                    {stats.queue.completed || 0}
                   </ModernBadge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Failed:</span>
                   <ModernBadge variant="error" size="sm">
-                    {stats.queue.failed}
+                    {stats.queue.failed || 0}
                   </ModernBadge>
                 </div>
               </div>
@@ -54,30 +54,30 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ stats }) => {
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Processing:</span>
                   <ModernBadge variant="warning" size="sm">
-                    {stats.transcription.processing}
+                    {stats.transcription.processing || 0}
                   </ModernBadge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Pending:</span>
                   <ModernBadge variant="secondary" size="sm">
-                    {stats.transcription.pending}
+                    {stats.transcription.pending || 0}
                   </ModernBadge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Awaiting:</span>
                   <ModernBadge variant="info" size="sm">
-                    {stats.transcription.feedsAwaitingTranscription}
+                    {stats.transcription.feedsAwaitingTranscription || 0}
                   </ModernBadge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">
-                    {stats.transcription.failed > 0 ? 'Failed:' : 'Complete:'}
+                    {(stats.transcription.failed || 0) > 0 ? 'Failed:' : 'Complete:'}
                   </span>
                   <ModernBadge 
-                    variant={stats.transcription.failed > 0 ? "error" : "success"} 
+                    variant={(stats.transcription.failed || 0) > 0 ? "error" : "success"} 
                     size="sm"
                   >
-                    {stats.transcription.failed > 0 ? stats.transcription.failed : stats.transcription.completed}
+                    {(stats.transcription.failed || 0) > 0 ? (stats.transcription.failed || 0) : (stats.transcription.completed || 0)}
                   </ModernBadge>
                 </div>
               </div>

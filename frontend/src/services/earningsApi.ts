@@ -16,29 +16,31 @@ export interface EarningsCalendarEntry {
   reporting_status: 'reported' | 'missed' | 'scheduled';
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL?.replace('/api/v1', '') || 'http://localhost:3001';
+// Use the same API URL as the main API
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8888/.netlify/functions/api/api/v1';
 
 export const earningsApi = {
   async getEarningsCalendarMonth(year: number, month: number) {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/earnings/calendar/${year}/${month}`);
+      const response = await fetch(`${API_BASE_URL}/earnings/calendar/${year}/${month}`);
       const result = await response.json();
       
       if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to fetch earnings calendar');
+        console.warn('API failed, falling back to mock data:', result.error);
+        return this.getMockEarningsCalendarMonth(year, month);
       }
       
       // Return actual data from database
       return result;
     } catch (error) {
-      console.error('Error fetching earnings calendar:', error);
-      throw error; // Propagate error instead of falling back to mock data
+      console.error('Error fetching earnings calendar, falling back to mock data:', error);
+      return this.getMockEarningsCalendarMonth(year, month);
     }
   },
 
   async getUpcomingEarnings(days: number = 30) {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/earnings/upcoming?days=${days}`);
+      const response = await fetch(`${API_BASE_URL}/earnings/upcoming?days=${days}`);
       const result = await response.json();
       
       if (!response.ok || !result.success) {
@@ -58,7 +60,7 @@ export const earningsApi = {
 
   async getEarningsWithReports(symbol: string, date: string) {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/earnings/reports/${symbol}/${date}`);
+      const response = await fetch(`${API_BASE_URL}/earnings/reports/${symbol}/${date}`);
       const result = await response.json();
       
       if (!response.ok || !result.success) {

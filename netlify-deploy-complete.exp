@@ -1,0 +1,48 @@
+#\!/usr/bin/expect -f
+
+set timeout 60
+
+spawn bash -c "source ~/.nvm/nvm.sh && nvm use 18 && netlify deploy --dir frontend/dist --prod"
+
+# Wait for "What would you like to do?"
+expect {
+    "What would you like to do?" {
+        sleep 1
+        send "\033\[B\r"
+    }
+}
+
+# Wait for "Team:"
+expect {
+    "Team:" {
+        sleep 1
+        send "\r"
+    }
+}
+
+# Wait for project name
+expect {
+    "Project name" {
+        sleep 1
+        send "silver-fin-monitor-prod\r"
+    }
+}
+
+# Wait for deployment to complete
+expect {
+    "Your site is live" {
+        puts "\nDeployment successful\!"
+    }
+    "Website URL:" {
+        puts "\nDeployment successful\!"
+    }
+    "Deploy path:" {
+        # Continue waiting
+        exp_continue
+    }
+    timeout {
+        puts "\nDeployment in progress..."
+    }
+}
+
+expect eof

@@ -33,21 +33,21 @@ export const QueueStats: React.FC<QueueStatsProps> = ({
       />
       <MetricCard
         title="Pending"
-        value={stats.currentQueue.pending.toString()}
+        value={(stats.currentQueue?.pending || 0).toString()}
         icon={<Clock className="w-5 h-5 text-blue-500" />}
         description="Waiting to process"
       />
 
       <MetricCard
         title="Processing"
-        value={stats.currentQueue.processing.toString()}
+        value={(stats.currentQueue?.processing || 0).toString()}
         icon={<Play className="w-5 h-5 text-green-500" />}
         description="Currently active"
       />
 
       <MetricCard
         title="Completed"
-        value={stats.currentQueue.completed.toString()}
+        value={(stats.currentQueue?.completed || 0).toString()}
         icon={<CheckCircle className="w-5 h-5 text-emerald-500" />}
         description="Successfully finished"
       />
@@ -55,26 +55,26 @@ export const QueueStats: React.FC<QueueStatsProps> = ({
       <ModernCard 
         variant="bordered"
         className={`cursor-pointer transition-colors ${
-          stats.currentQueue.failed > 0 
+          (stats.currentQueue?.failed || 0) > 0 
             ? 'hover:bg-red-50 dark:hover:bg-red-950/30 border-red-200 dark:border-red-800' 
             : ''
         }`}
-        onClick={() => stats.currentQueue.failed > 0 && onFailedClick()}
+        onClick={() => (stats.currentQueue?.failed || 0) > 0 && onFailedClick()}
       >
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Failed</p>
               <p className="text-2xl font-bold text-red-600">
-                {stats.currentQueue.failed}
-                {stats.currentQueue.failed > 0 && (
+                {stats.currentQueue?.failed || 0}
+                {(stats.currentQueue?.failed || 0) > 0 && (
                   <span className="text-xs ml-1 text-red-500">⚠️</span>
                 )}
               </p>
             </div>
             <AlertCircle className="w-8 h-8 text-red-500" />
           </div>
-          {stats.currentQueue.failed > 0 && (
+          {(stats.currentQueue?.failed || 0) > 0 && (
             <p className="text-xs text-red-500 mt-1">Click to view failed jobs</p>
           )}
         </CardContent>

@@ -211,19 +211,19 @@ export const WhisperServiceStatus: React.FC<WhisperServiceStatusProps> = ({ clas
         {queueStatus && (
           <div className="grid grid-cols-4 gap-2 text-xs">
             <div className="text-center p-2 bg-yellow-50 rounded">
-              <div className="font-medium text-yellow-800">{queueStatus.pending}</div>
+              <div className="font-medium text-yellow-800">{queueStatus?.pending || 0}</div>
               <div className="text-yellow-600">Pending</div>
             </div>
             <div className="text-center p-2 bg-blue-50 rounded">
-              <div className="font-medium text-blue-800">{queueStatus.processing}</div>
+              <div className="font-medium text-blue-800">{queueStatus?.processing || 0}</div>
               <div className="text-blue-600">Processing</div>
             </div>
             <div className="text-center p-2 bg-green-50 rounded">
-              <div className="font-medium text-green-800">{queueStatus.completed}</div>
+              <div className="font-medium text-green-800">{queueStatus?.completed || 0}</div>
               <div className="text-green-600">Completed</div>
             </div>
             <div className="text-center p-2 bg-red-50 rounded">
-              <div className="font-medium text-red-800">{queueStatus.failed}</div>
+              <div className="font-medium text-red-800">{queueStatus?.failed || 0}</div>
               <div className="text-red-600">Failed</div>
             </div>
           </div>

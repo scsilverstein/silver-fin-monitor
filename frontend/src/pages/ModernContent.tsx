@@ -66,14 +66,14 @@ export const ModernContent: React.FC = () => {
       status: 'info'
     }),
     createStatItems.percentage('avg_sentiment', 'Avg Sentiment', 
-      content.length > 0 
+      Array.isArray(content) && content.length > 0 
         ? Math.abs(content.reduce((sum, item) => sum + (item.sentiment_score || 0), 0) / content.length * 100)
         : 0
     ),
     createStatItems.count('entities', 'Unique Entities', 
-      new Set(content.flatMap(item => 
+      Array.isArray(content) ? new Set(content.flatMap(item => 
         Object.values(item.entities || {}).flat()
-      )).size
+      )).size : 0
     )
   ];
 
@@ -85,7 +85,7 @@ export const ModernContent: React.FC = () => {
     { value: '90d', label: 'Last 90 Days' }
   ];
 
-  if (loading && content.length === 0) {
+  if (loading && (!Array.isArray(content) || content.length === 0)) {
     return <ContentSkeleton />;
   }
 
@@ -139,7 +139,7 @@ export const ModernContent: React.FC = () => {
         </div>
 
         <div className="space-y-4 animate-in slide-in-up" style={{ animationDelay: '150ms' }}>
-        {loading && content.length > 0 && (
+        {loading && Array.isArray(content) && content.length > 0 && (
           <LoadingState message="Loading more content..." variant="refresh" size="sm" className="py-4" />
         )}
         
@@ -152,7 +152,7 @@ export const ModernContent: React.FC = () => {
                 resetFilters();
               }}
             />
-          ) : content.length > 0 ? (
+          ) : Array.isArray(content) && content.length > 0 ? (
             <EmptyState
               icon={<Filter className="h-12 w-12 text-muted-foreground" />}
               title="No content matches filters"

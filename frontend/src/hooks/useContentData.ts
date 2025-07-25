@@ -28,20 +28,30 @@ export const useContentData = () => {
       };
       
       // Make the API call and get full response with metadata
-      const response = await api.get<ApiResponse<ProcessedContent[]>>('/content', { params });
+      const response = await api.get<ApiResponse<ProcessedContent[] | { content: ProcessedContent[]; total: number; page: number; pageSize?: number }>>('/content', { params });
       
       if (response.data.success && response.data.data) {
-        setContent(response.data.data);
+        // Handle both formats: direct array or nested object with content property
+        const contentData = Array.isArray(response.data.data) 
+          ? response.data.data 
+          : response.data.data.content || [];
+        
+        setContent(contentData);
         
         // Use pagination info from API response meta if available
         if (response.data.meta) {
           setTotalItems(response.data.meta.total);
           setTotalPages(Math.ceil(response.data.meta.total / limit));
           setCurrentPage(response.data.meta.page);
+        } else if (!Array.isArray(response.data.data) && response.data.data.total !== undefined) {
+          // Handle nested format pagination info
+          setTotalItems(response.data.data.total);
+          setTotalPages(Math.ceil(response.data.data.total / limit));
+          setCurrentPage(response.data.data.page || 1);
         } else {
           // Fallback if no meta info
-          setTotalItems(response.data.data.length);
-          setTotalPages(Math.ceil(response.data.data.length / limit));
+          setTotalItems(contentData.length);
+          setTotalPages(Math.ceil(contentData.length / limit));
         }
       } else {
         setContent([]);

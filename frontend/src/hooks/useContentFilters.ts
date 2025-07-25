@@ -19,6 +19,8 @@ interface ContentItem {
 }
 
 export const useProcessedContentFilters = (content: ContentItem[] = []) => {
+  // Ensure content is always an array
+  const safeContent = Array.isArray(content) ? content : [];
   const { getCurrentFilters, updateFilters } = useSmartNavigation();
   const urlFilters = getCurrentFilters();
   
@@ -66,7 +68,7 @@ export const useProcessedContentFilters = (content: ContentItem[] = []) => {
 
   // Filter content based on current filters
   const filteredContent = useMemo(() => {
-    return content.filter((item) => {
+    return safeContent.filter((item) => {
       // Search filter
       if (filters.search) {
         const searchTerm = filters.search.toLowerCase();
@@ -128,7 +130,7 @@ export const useProcessedContentFilters = (content: ContentItem[] = []) => {
 
       return true;
     });
-  }, [content, filters]);
+  }, [safeContent, filters]);
 
   const toggleExpanded = (itemId: string) => {
     setExpandedContent(prev => {

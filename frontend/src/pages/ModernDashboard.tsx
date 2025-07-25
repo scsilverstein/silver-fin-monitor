@@ -237,10 +237,10 @@ export const ModernDashboard: React.FC = () => {
               currentStats={stats ? {
                 timestamp: new Date().toISOString(),
                 queue: {
-                  pending: stats.queue.pending,
-                  processing: stats.queue.processing, 
-                  completed: stats.queue.completed,
-                  failed: stats.queue.failed,
+                  pending: stats.queue?.pending || 0,
+                  processing: stats.queue?.processing || 0, 
+                  completed: stats.queue?.completed || 0,
+                  failed: stats.queue?.failed || 0,
                   retry: 0
                 },
                 processing: {
@@ -249,10 +249,10 @@ export const ModernDashboard: React.FC = () => {
                   successRate: 0.94
                 },
                 transcription: {
-                  pending: stats.transcription.pending,
-                  processing: stats.transcription.processing,
-                  completed: stats.transcription.completed,
-                  failed: stats.transcription.failed,
+                  pending: stats.transcription?.pending || 0,
+                  processing: stats.transcription?.processing || 0,
+                  completed: stats.transcription?.completed || 0,
+                  failed: stats.transcription?.failed || 0,
                   avgTime: 3000
                 }
               } : undefined}

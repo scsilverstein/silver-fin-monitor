@@ -125,13 +125,13 @@ export const SystemPerformanceChart: React.FC<SystemPerformanceChartProps> = ({
       }));
     }
 
-    if (chartType === 'status' && currentStats) {
+    if (chartType === 'status' && currentStats && currentStats.queue) {
       const queueData = [
-        { name: 'Completed', value: currentStats.queue.completed, color: STATUS_COLORS.completed },
-        { name: 'Processing', value: currentStats.queue.processing, color: STATUS_COLORS.processing },
-        { name: 'Pending', value: currentStats.queue.pending, color: STATUS_COLORS.pending },
-        { name: 'Failed', value: currentStats.queue.failed, color: STATUS_COLORS.failed },
-        { name: 'Retry', value: currentStats.queue.retry, color: STATUS_COLORS.retry }
+        { name: 'Completed', value: currentStats.queue.completed || 0, color: STATUS_COLORS.completed },
+        { name: 'Processing', value: currentStats.queue.processing || 0, color: STATUS_COLORS.processing },
+        { name: 'Pending', value: currentStats.queue.pending || 0, color: STATUS_COLORS.pending },
+        { name: 'Failed', value: currentStats.queue.failed || 0, color: STATUS_COLORS.failed },
+        { name: 'Retry', value: currentStats.queue.retry || 0, color: STATUS_COLORS.retry }
       ].filter(item => item.value > 0);
 
       return queueData;
@@ -143,8 +143,8 @@ export const SystemPerformanceChart: React.FC<SystemPerformanceChartProps> = ({
         timestamp: item.timestamp,
         memoryUsage: item.memory ? (item.memory.used / item.memory.total) * 100 : Math.random() * 70 + 20,
         cpuUsage: item.cpu || Math.random() * 60 + 20,
-        transcriptionQueue: item.transcription.pending + item.transcription.processing,
-        processingQueue: item.queue.pending + item.queue.processing
+        transcriptionQueue: (item.transcription?.pending || 0) + (item.transcription?.processing || 0),
+        processingQueue: (item.queue?.pending || 0) + (item.queue?.processing || 0)
       }));
     }
 

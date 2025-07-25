@@ -7,9 +7,14 @@ const getApiUrl = () => {
     return import.meta.env.VITE_API_URL;
   }
   
-  // In production (Netlify), use the functions endpoint
+  // Check if we're on Netlify (production or preview)
+  if (window.location.hostname.includes('netlify.app') || window.location.hostname.includes('netlify.com')) {
+    return '/api/v1';
+  }
+  
+  // In production build but not Netlify, use relative path
   if (import.meta.env.PROD) {
-    return '/.netlify/functions/api/api/v1';
+    return '/api/v1';
   }
   
   // In development, use local server
