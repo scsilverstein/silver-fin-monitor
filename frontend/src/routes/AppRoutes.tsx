@@ -19,6 +19,8 @@ import { EntityAnalyticsPage } from '@/pages/EntityAnalytics';
 import { Admin } from '@/pages/Admin';
 import EarningsCalendarPage from '@/pages/EarningsCalendar';
 import IntelligenceDashboard from '@/pages/IntelligenceDashboard';
+import { AnalysisOverlay } from '@/pages/AnalysisOverlay';
+import { StockScreener } from '@/pages/StockScreener';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -78,6 +80,17 @@ export const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <ModernLayout>
               <TimeframeAnalysis />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
+        path="/analysis/overlay"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <AnalysisOverlay />
             </ModernLayout>
           </ProtectedRoute>
         }
@@ -144,6 +157,17 @@ export const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <ModernLayout>
               <EarningsCalendarPage />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
+        path="/stocks/screener"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <StockScreener />
             </ModernLayout>
           </ProtectedRoute>
         }

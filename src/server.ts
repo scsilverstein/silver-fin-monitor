@@ -7,12 +7,12 @@ import morgan from 'morgan';
 import { config, validateConfig } from '@/config';
 import { db } from '@/services/database';
 import { cache } from '@/services/cache';
-import { queueService } from '@/services/database/queue';
+// import { queueService } from '@/services/database/queue';
 import { logger } from '@/utils/logger';
 import { errorHandler, notFoundHandler, requestTimeout, validateContentType, requestLogger } from '@/middleware/error';
 import { globalRateLimiter } from '@/middleware/rateLimit';
 import { apiV1 } from '@/routes';
-import { queueWorker } from '@/services/workers/queue-worker';
+// import { queueWorker } from '@/services/workers/queue-worker';
 
 // Create Express app
 const app: Application = express();
@@ -75,50 +75,50 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 // Graceful shutdown handler
-const gracefulShutdown = async (signal: string): Promise<void> => {
-  logger.info(`${signal} received, starting graceful shutdown`);
-  
-  try {
-    // Stop accepting new requests
-    server.close(() => {
-      logger.info('HTTP server closed');
-    });
+// const gracefulShutdown = async (signal: string): Promise<void> => {
+//   logger.info(`${signal} received, starting graceful shutdown`);
+//   
+//   try {
+//     // Stop accepting new requests
+//     server.close(() => {
+//       logger.info('HTTP server closed');
+//     });
 
-    // Stop queue worker
-    await queueWorker.stop();
-    logger.info('Queue worker stopped');
+//     // Stop queue worker
+//     await queueWorker.stop();
+//     logger.info('Queue worker stopped');
 
-    // Cleanup expired cache/jobs
-    await cache.cleanup();
-    logger.info('Cache cleanup completed');
+//     // Cleanup expired cache/jobs
+//     await cache.cleanup();
+//     logger.info('Cache cleanup completed');
 
-    // Disconnect database
-    await db.disconnect();
-    logger.info('Database disconnected');
+//     // Disconnect database
+//     await db.disconnect();
+//     logger.info('Database disconnected');
 
-    logger.info('Graceful shutdown completed');
-    process.exit(0);
-  } catch (error) {
-    logger.error('Error during graceful shutdown', error);
-    process.exit(1);
-  }
-};
+//     logger.info('Graceful shutdown completed');
+//     process.exit(0);
+//   } catch (error) {
+//     logger.error('Error during graceful shutdown', error);
+//     process.exit(1);
+//   }
+// };
 
-// Register shutdown handlers
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+// // Register shutdown handlers
+// process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+// process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught exception', error);
-  gracefulShutdown('uncaughtException');
-});
+// // Handle uncaught exceptions
+// process.on('uncaughtException', (error) => {
+//   logger.error('Uncaught exception', error);
+//   gracefulShutdown('uncaugentException');
+// });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled rejection', { reason, promise });
-  gracefulShutdown('unhandledRejection');
-});
+// // Handle unhandled promise rejections
+// process.on('unhandledRejection', (reason, promise) => {
+//   logger.error('Unhandled rejection', { reason, promise });
+//   gracefulShutdown('unhandledRejection');
+// });
 
 // Server startup
 let server: any;
@@ -130,22 +130,29 @@ const startServer = async (): Promise<void> => {
     logger.info('Configuration validated');
 
     // Connect to database
-    await db.connect();
-    logger.info('Database connected');
+    try {
+      logger.info('Attempting to connect to database...');
+      await db.connect();
+      logger.info('Database connected successfully');
+    } catch (error) {
+      logger.error('Database connection failed:', error);
+      // Continue without database for now
+      logger.warn('Continuing without database connection');
+    }
 
     // Start queue worker (this handles all queue processing)
-    await queueWorker.start();
-    logger.info('Queue worker started');
+    // await queueWorker.start();
+    // logger.info('Queue worker started');
 
     // Schedule cleanup jobs
-    setInterval(async () => {
-      try {
-        await cache.cleanup();
-        await queueService.enqueue('cleanup', {}, 10);
-      } catch (error) {
-        logger.error('Cleanup job error', error);
-      }
-    }, config.queue.cleanupInterval);
+    // setInterval(async () => {
+    //   try {
+    //     await cache.cleanup();
+    //     await queueService.enqueue('cleanup', {}, 10);
+    //   } catch (error) {
+    //     logger.error('Cleanup job error', error);
+    //   }
+    // }, config.queue.cleanupInterval);
 
     // Start server
     const host = '0.0.0.0'; // Bind to all interfaces for testing

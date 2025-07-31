@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Activity,
   FileText,
+  DollarSign,
   Users,
   Shield,
   Target,
@@ -53,6 +54,24 @@ const navigation: NavItem[] = [
     label: 'Analysis',
     href: '/analysis',
     icon: Brain,
+    children: [
+      {
+        label: 'Market Analysis',
+        href: '/analysis',
+        icon: Brain,
+      },
+      {
+        label: 'Analysis Overlay',
+        href: '/analysis/overlay',
+        icon: TrendingUp,
+        badge: 'New',
+      },
+      {
+        label: 'Timeframe Analysis',
+        href: '/analysis/timeframe',
+        icon: Calendar,
+      },
+    ],
   },
   {
     label: 'Predictions',
@@ -68,6 +87,12 @@ const navigation: NavItem[] = [
     label: 'Earnings Calendar',
     href: '/earnings',
     icon: Calendar,
+    badge: 'New',
+  },
+  {
+    label: 'Stock Screener',
+    href: '/stocks/screener',
+    icon: DollarSign,
     badge: 'New',
   },
   {

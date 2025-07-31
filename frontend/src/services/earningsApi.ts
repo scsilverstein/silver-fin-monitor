@@ -17,7 +17,7 @@ export interface EarningsCalendarEntry {
 }
 
 // Use the same API URL as the main API
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8888/.netlify/functions/api/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:9999/.netlify/functions/api/api/v1';
 
 export const earningsApi = {
   async getEarningsCalendarMonth(year: number, month: number) {

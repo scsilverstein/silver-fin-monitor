@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Analysis Overlay</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .toggle {
+            margin: 10px 0;
+        }
+        .analysis-item {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .sentiment {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .sentiment.bullish {
+            background: #10b981;
+            color: white;
+        }
+        .sentiment.bearish {
+            background: #ef4444;
+            color: white;
+        }
+        .sentiment.neutral {
+            background: #6b7280;
+            color: white;
+        }
+        .processed-text {
+            margin-top: 10px;
+            line-height: 1.6;
+        }
+        .time-reference {
+            color: #3b82f6;
+            font-weight: bold;
+        }
+        .market-movement {
+            color: #10b981;
+            font-weight: bold;
+        }
+        .replaced {
+            background-color: #fef3c7;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Analysis Overlay Test</h1>
+        
+        <div class="controls">
+            <h2>Display Controls</h2>
+            <div class="toggle">
+                <label>
+                    <input type="checkbox" id="showTimeReferences" checked>
+                    Show Time References
+                </label>
+            </div>
+            <div class="toggle">
+                <label>
+                    <input type="checkbox" id="showMarketMovements" checked>
+                    Show Market Movements
+                </label>
+            </div>
+            <button onclick="fetchData()">Refresh Data</button>
+        </div>
+
+        <div id="analysisContainer">
+            Loading...
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3001/api/v1/analysis';
+        
+        // Time reference patterns
+        const timeReferencePattern = /\b(today|yesterday|tomorrow|this week|last week|next week|this month|last month|next month|this year|last year|next year|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)\b/gi;
+        
+        // Market movement patterns
+        const marketMovementPattern = /\b(rose|fell|gained|lost|increased|decreased|surged|plummeted|jumped|dropped|climbed|declined|advanced|retreated|soared|tumbled|rallied|slumped|up|down|higher|lower|bullish|bearish)\b/gi;
+
+        function processText(text, showTimeReferences, showMarketMovements) {
+            let processed = text;
+            
+            if (!showTimeReferences) {
+                processed = processed.replace(timeReferencePattern, '<span class="replaced">[time reference]</span>');
+            } else {
+                processed = processed.replace(timeReferencePattern, '<span class="time-reference">$1</span>');
+            }
+            
+            if (!showMarketMovements) {
+                processed = processed.replace(marketMovementPattern, '<span class="replaced">[market movement]</span>');
+            } else {
+                processed = processed.replace(marketMovementPattern, '<span class="market-movement">$1</span>');
+            }
+            
+            return processed;
+        }
+
+        function renderAnalysis(data) {
+            const container = document.getElementById('analysisContainer');
+            const showTimeReferences = document.getElementById('showTimeReferences').checked;
+            const showMarketMovements = document.getElementById('showMarketMovements').checked;
+            
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                container.innerHTML = '<p>No analysis data available.</p>';
+                return;
+            }
+            
+            const html = data.map(item => `
+                <div class="analysis-item">
+                    <h3>${item.analysis_date}</h3>
+                    <span class="sentiment ${item.market_sentiment}">${item.market_sentiment.toUpperCase()}</span>
+                    <span style="margin-left: 10px;">Confidence: ${(item.confidence_score * 100).toFixed(1)}%</span>
+                    <div class="processed-text">
+                        ${processText(item.overall_summary, showTimeReferences, showMarketMovements)}
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <strong>Key Themes:</strong> ${item.key_themes.join(', ')}
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = html;
+        }
+
+        async function fetchData() {
+            try {
+                const response = await fetch(API_URL);
+                const result = await response.json();
+                console.log('API Response:', result);
+                
+                const data = result.data || result;
+                renderAnalysis(data);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                document.getElementById('analysisContainer').innerHTML = 
+                    '<p style="color: red;">Error loading data. Make sure the API server is running.</p>';
+            }
+        }
+
+        // Event listeners
+        document.getElementById('showTimeReferences').addEventListener('change', () => {
+            fetchData();
+        });
+        
+        document.getElementById('showMarketMovements').addEventListener('change', () => {
+            fetchData();
+        });
+
+        // Initial load
+        fetchData();
+    </script>
+</body>
+</html>

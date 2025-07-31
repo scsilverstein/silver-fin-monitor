@@ -133,8 +133,8 @@ netlify dev
 ```
 
 This will start:
-- Frontend on http://localhost:8888
-- Functions on http://localhost:8888/.netlify/functions/
+- Frontend on http://localhost:9999
+- Functions on http://localhost:9999/.netlify/functions/
 
 ## Troubleshooting
 

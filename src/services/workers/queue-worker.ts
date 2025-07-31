@@ -63,97 +63,126 @@ export class QueueWorker {
       }
       
       try {
-        logger.info('Starting audio transcription job', { 
+        logger.info('Starting audio transcription job with Netlify background function', { 
           feedId, 
           audioUrl, 
           title: title || 'Unknown',
           jobStartTime
         });
 
-        // Update raw feed status to indicate transcription in progress
-        await db.getClient()
-          .from('raw_feeds')
-          .update({ 
-            processing_status: 'processing',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', feedId);
+        // Import Netlify Whisper service
+        const { netlifyWhisperService } = await import('../transcription/netlify-whisper.service');
         
-        // Dynamically import to avoid loading if not needed
-        const { whisperService } = await import('../transcription/whisper.service');
-        
-        // Check if Whisper is available
-        const isAvailable = await whisperService.isAvailable();
+        // Check if Netlify service is available
+        const isAvailable = await netlifyWhisperService.isAvailable();
         if (!isAvailable) {
-          const errorMsg = 'Whisper service not available for transcription job';
-          logger.error(errorMsg, { feedId, audioUrl });
+          logger.warn('Netlify Whisper service not available, falling back to local Whisper');
           
-          // Update feed status to failed
-          await db.getClient()
-            .from('raw_feeds')
-            .update({ 
-              processing_status: 'failed',
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', feedId);
+          // Fallback to local Whisper if available
+          const { whisperService } = await import('../transcription/whisper.service');
+          const localAvailable = await whisperService.isAvailable();
           
-          throw new Error(errorMsg);
+          if (localAvailable) {
+            logger.info('Using local Whisper service as fallback');
+            const result = await whisperService.transcribeAudio(audioUrl, feedId);
+            
+            // Update the raw feed with transcribed content
+            await db.getClient()
+              .from('raw_feeds')
+              .update({
+                content: result.text,
+                metadata: {
+                  ...payload.originalMetadata,
+                  transcriptionComplete: true,
+                  transcriptionLanguage: result.language,
+                  audioUrl: audioUrl,
+                  needsTranscription: false,
+                  transcriptionMethod: 'local_whisper'
+                },
+                processing_status: 'pending', // Ready for content processing
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', feedId);
+            
+            // Process the transcribed content
+            await contentProcessor.processContent(feedId);
+            
+            logger.info('Transcription completed with local Whisper', { feedId });
+            return;
+          }
+          
+          throw new Error('No transcription service available (neither Netlify nor local)');
         }
         
-        logger.info('Whisper service available, starting transcription', { feedId });
+        logger.info('Netlify Whisper service available, queuing background transcription', { feedId });
         
-        // Perform transcription with progress logging
-        const transcriptionStartTime = Date.now();
-        const result = await whisperService.transcribeAudio(audioUrl, feedId);
-        const transcriptionDuration = Date.now() - transcriptionStartTime;
-        
-        logger.info('Transcription completed successfully', {
-          feedId,
-          title: title || 'Unknown',
-          textLength: result.text.length,
-          language: result.language,
-          transcriptionDurationMs: transcriptionDuration,
-          charactersPerSecond: Math.round(result.text.length / (transcriptionDuration / 1000))
+        // Queue transcription in Netlify background function
+        const result = await netlifyWhisperService.transcribeAudio(audioUrl, feedId, {
+          title,
+          originalMetadata: payload.originalMetadata
         });
-
-        // Update the raw feed with transcribed content
-        const { error: updateError } = await db.getClient()
-          .from('raw_feeds')
-          .update({
-            content: result.text,
-            metadata: {
-              ...payload.originalMetadata,
-              transcriptionComplete: true,
-              transcriptionLanguage: result.language,
-              transcriptionDurationMs: transcriptionDuration,
-              audioUrl: audioUrl,
-              needsTranscription: false
-            },
-            processing_status: 'pending', // Ready for content processing
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', feedId);
-
-        if (updateError) {
-          logger.error('Failed to update feed with transcription', { 
-            feedId, 
-            error: updateError 
-          });
-          throw updateError;
-        }
-
-        logger.info('Raw feed updated with transcription, starting content processing', { feedId });
         
-        // Process the transcribed content
-        await contentProcessor.processContent(feedId);
+        if (!result.success) {
+          throw result.error || new Error('Failed to queue transcription');
+        }
+        
+        logger.info('Transcription queued successfully in Netlify background function', {
+          feedId,
+          jobId: result.data.jobId,
+          title: title || 'Unknown'
+        });
+        
+        // The background function will handle:
+        // 1. Downloading and transcribing the audio
+        // 2. Updating the raw_feeds table with the transcript
+        // 3. Queuing the content_process job
+        
+        // Monitor transcription progress (optional)
+        const monitorProgress = async () => {
+          let attempts = 0;
+          const maxAttempts = 60; // 5 minutes with 5 second intervals
+          
+          while (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+            
+            const status = await netlifyWhisperService.getTranscriptionStatus(feedId);
+            if (status.success && status.data) {
+              logger.info('Transcription progress', {
+                feedId,
+                status: status.data.status,
+                progress: status.data.progress
+              });
+              
+              if (status.data.status === 'completed') {
+                logger.info('Background transcription completed', { feedId });
+                break;
+              } else if (status.data.status === 'failed') {
+                logger.error('Background transcription failed', { 
+                  feedId, 
+                  error: status.data.error 
+                });
+                break;
+              }
+            }
+            
+            attempts++;
+          }
+          
+          if (attempts >= maxAttempts) {
+            logger.warn('Stopped monitoring transcription progress after timeout', { feedId });
+          }
+        };
+        
+        // Start monitoring in background (don't await)
+        monitorProgress().catch(error => {
+          logger.error('Error monitoring transcription progress', { feedId, error });
+        });
         
         const totalJobDuration = Date.now() - jobStartTime;
-        logger.info('Transcription job completed successfully', {
+        logger.info('Transcription job delegated to Netlify background function', {
           feedId,
           title: title || 'Unknown',
-          totalJobDurationMs: totalJobDuration,
-          transcriptionDurationMs: transcriptionDuration,
-          processingDurationMs: totalJobDuration - transcriptionDuration
+          jobDurationMs: totalJobDuration
         });
         
       } catch (error) {
@@ -224,6 +253,32 @@ export class QueueWorker {
       const { StockScannerJobProcessor } = await import('../stock/stock-scanner-jobs');
       const processor = new StockScannerJobProcessor(cache, queueService);
       await processor.processJob('stock_daily_scan', payload);
+    },
+
+    // Options scanner jobs
+    options_scan: async (payload) => {
+      const { optionsJobHandlers } = await import('../options/options-scanner-jobs');
+      await optionsJobHandlers.options_scan(payload, queueService);
+    },
+
+    option_analysis: async (payload) => {
+      const { optionsJobHandlers } = await import('../options/options-scanner-jobs');
+      await optionsJobHandlers.option_analysis(payload, queueService);
+    },
+
+    unusual_options_activity: async (payload) => {
+      const { optionsJobHandlers } = await import('../options/options-scanner-jobs');
+      await optionsJobHandlers.unusual_options_activity(payload, queueService);
+    },
+
+    schedule_daily_options_scan: async (payload) => {
+      const { optionsJobHandlers } = await import('../options/options-scanner-jobs');
+      await optionsJobHandlers.schedule_daily_options_scan(payload, queueService);
+    },
+
+    options_alerts: async (payload) => {
+      const { optionsJobHandlers } = await import('../options/options-scanner-jobs');
+      await optionsJobHandlers.options_alerts(payload, queueService);
     }
   };
 

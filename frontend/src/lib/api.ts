@@ -7,6 +7,16 @@ const getApiUrl = () => {
     return import.meta.env.VITE_API_URL;
   }
   
+  // In development, use appropriate server
+  if (import.meta.env.DEV || window.location.port === '9999') {
+    // Temporary: Use test server for stock endpoints
+    if (window.location.pathname.includes('/stocks')) {
+      return 'http://localhost:9999/api/v1';
+    }
+    // Use backend server for other endpoints
+    return 'http://localhost:3001/api/v1';
+  }
+  
   // Check if we're on Netlify (production or preview)
   if (window.location.hostname.includes('netlify.app') || window.location.hostname.includes('netlify.com')) {
     return '/api/v1';
@@ -17,7 +27,7 @@ const getApiUrl = () => {
     return '/api/v1';
   }
   
-  // In development, use local server
+  // Default to local server
   return 'http://localhost:3001/api/v1';
 };
 

@@ -13,6 +13,13 @@
   
   # Directory for serverless functions
   functions = "netlify/functions"
+  
+  # Port configuration for dev server
+  [dev]
+    port = 9999
+    functionsPort = 8889
+
+# Development proxy configuration
 
 # Build environment variables
 [build.environment]
@@ -28,6 +35,13 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "no-referrer"
     Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+
+# Stock API proxy to test server
+[[redirects]]
+  from = "/api/v1/stocks/*"
+  to = "http://localhost:9999/api/v1/stocks/:splat"
+  status = 200
+  force = true
 
 # API proxy redirects
 [[redirects]]
@@ -64,3 +78,5 @@
 # Plugins
 [[plugins]]
   package = "@netlify/plugin-functions-install-core"
+
+  

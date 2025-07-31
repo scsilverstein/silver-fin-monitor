@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netlify Functions Test</title>
+</head>
+<body>
+    <h1>Netlify Functions Test</h1>
+    <button onclick="testHealth()">Test Health</button>
+    <button onclick="testStockScreener()">Test Stock Screener</button>
+    <button onclick="testDirectFunction()">Test Direct Function Path</button>
+    <pre id="output"></pre>
+
+    <script>
+        async function testHealth() {
+            const output = document.getElementById('output');
+            output.textContent = 'Testing health endpoint...\n';
+            
+            try {
+                const response = await fetch('/api/v1/health');
+                const data = await response.json();
+                output.textContent += JSON.stringify(data, null, 2);
+            } catch (error) {
+                output.textContent += 'Error: ' + error.message;
+            }
+        }
+
+        async function testStockScreener() {
+            const output = document.getElementById('output');
+            output.textContent = 'Testing stock screener endpoint...\n';
+            
+            try {
+                const response = await fetch('/api/v1/stocks/screener');
+                const data = await response.json();
+                output.textContent += JSON.stringify(data, null, 2);
+            } catch (error) {
+                output.textContent += 'Error: ' + error.message;
+            }
+        }
+
+        async function testDirectFunction() {
+            const output = document.getElementById('output');
+            output.textContent = 'Testing direct function path...\n';
+            
+            try {
+                const response = await fetch('/.netlify/functions/api/api/v1/health');
+                const data = await response.json();
+                output.textContent += JSON.stringify(data, null, 2);
+            } catch (error) {
+                output.textContent += 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

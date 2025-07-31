@@ -161,7 +161,7 @@ export class AdminController {
   getUser = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { userId } = req.params;
 
-    if (!validateUUID(userId)) {
+    if (!userId || !validateUUID(userId)) {
       res.status(400).json({
         success: false,
         error: {
@@ -173,7 +173,7 @@ export class AdminController {
     }
 
     try {
-      const user = await authService.getUserById(userId);
+      const user = await authService.getUserById(userId!);
       
       if (!user) {
         res.status(404).json({
@@ -231,7 +231,7 @@ export class AdminController {
       usageLimits
     } = req.body;
 
-    if (!validateUUID(userId)) {
+    if (!userId || !validateUUID(userId)) {
       res.status(400).json({
         success: false,
         error: {
@@ -258,7 +258,7 @@ export class AdminController {
             updated_at = NOW()
         WHERE id = $1
         RETURNING *
-      `, [userId, ...Object.values(updates)]);
+      `, [userId!, ...Object.values(updates)]);
 
       if (result.length === 0) {
         res.status(404).json({
@@ -293,7 +293,7 @@ export class AdminController {
   deleteUser = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { userId } = req.params;
 
-    if (!validateUUID(userId)) {
+    if (!userId || !validateUUID(userId)) {
       res.status(400).json({
         success: false,
         error: {
@@ -445,7 +445,7 @@ export class AdminController {
     const { userId } = req.params;
     const { newPassword } = req.body;
 
-    if (!validateUUID(userId)) {
+    if (!userId || !validateUUID(userId)) {
       res.status(400).json({
         success: false,
         error: {
@@ -487,7 +487,7 @@ export class AdminController {
     const { userId } = req.params;
     const { tier, durationDays = 30 } = req.body;
 
-    if (!validateUUID(userId)) {
+    if (!userId || !validateUUID(userId)) {
       res.status(400).json({
         success: false,
         error: {

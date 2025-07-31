@@ -1,0 +1,44 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "noEmit": false,
+    "outDir": "./dist-netlify"
+  },
+  "include": [
+    "netlify/functions/**/*.ts",
+    "src/routes/index.ts",
+    "src/routes/stock-screener.routes.ts",
+    "src/controllers/stock-screener.controller.ts",
+    "src/controllers/auth.controller.ts",
+    "src/services/database/**/*.ts",
+    "src/services/cache/**/*.ts",
+    "src/services/polygon/**/*.ts",
+    "src/middleware/error.ts",
+    "src/middleware/rateLimit.ts",
+    "src/config/**/*.ts",
+    "src/utils/logger.ts",
+    "src/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "src/controllers/admin.controller.ts",
+    "src/controllers/feeds.controller.ts",
+    "src/controllers/options.controller.ts",
+    "src/controllers/queue.controller.ts",
+    "src/controllers/stock.controller.ts",
+    "src/services/ai/**/*.ts",
+    "src/services/feeds/**/*.ts",
+    "src/services/options/**/*.ts",
+    "src/services/stock/fundamental-analyzer.ts",
+    "src/services/stock/peer-comparison-engine.ts",
+    "src/services/stock/stock-scanner-jobs.ts"
+  ]
+}

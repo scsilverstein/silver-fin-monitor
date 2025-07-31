@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Screener Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 12px;
+            color: #666;
+            font-weight: bold;
+        }
+        select, input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            border-bottom: 2px solid #dee2e6;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        th:hover {
+            background: #e9ecef;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .positive {
+            color: #28a745;
+        }
+        .negative {
+            color: #dc3545;
+        }
+        .value-score {
+            font-weight: bold;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .value-score.high {
+            background: #d4edda;
+            color: #155724;
+        }
+        .value-score.medium {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .value-score.low {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .stats {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .error {
+            color: #dc3545;
+            padding: 20px;
+            background: #f8d7da;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NASDAQ Stock Screener - Undervalued Stocks</h1>
+        
+        <div class="filters">
+            <div class="filter-group">
+                <label for="sector">Sector</label>
+                <select id="sector">
+                    <option value="">All Sectors</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="minPE">Min P/E</label>
+                <input type="number" id="minPE" placeholder="0" step="0.1">
+            </div>
+            
+            <div class="filter-group">
+                <label for="maxPE">Max P/E</label>
+                <input type="number" id="maxPE" placeholder="50" step="0.1">
+            </div>
+            
+            <div class="filter-group">
+                <label for="minForwardPE">Min Forward P/E</label>
+                <input type="number" id="minForwardPE" placeholder="0" step="0.1">
+            </div>
+            
+            <div class="filter-group">
+                <label for="maxForwardPE">Max Forward P/E</label>
+                <input type="number" id="maxForwardPE" placeholder="50" step="0.1">
+            </div>
+            
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button onclick="applyFilters()">Apply Filters</button>
+            </div>
+        </div>
+        
+        <div class="stats" id="stats"></div>
+        
+        <div id="content">
+            <div class="loading">Loading stocks...</div>
+        </div>
+    </div>
+
+    <script>
+        let stockData = [];
+        let currentSort = { field: 'valueScore', direction: 'desc' };
+
+        async function loadSectors() {
+            try {
+                const response = await fetch('http://localhost:3001/api/v1/stocks/sectors');
+                const data = await response.json();
+                
+                const sectorSelect = document.getElementById('sector');
+                data.data.forEach(sector => {
+                    const option = document.createElement('option');
+                    option.value = sector;
+                    option.textContent = sector;
+                    sectorSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading sectors:', error);
+            }
+        }
+
+        async function loadStocks() {
+            try {
+                const params = new URLSearchParams();
+                const sector = document.getElementById('sector').value;
+                const minPE = document.getElementById('minPE').value;
+                const maxPE = document.getElementById('maxPE').value;
+                const minForwardPE = document.getElementById('minForwardPE').value;
+                const maxForwardPE = document.getElementById('maxForwardPE').value;
+
+                if (sector) params.append('sector', sector);
+                if (minPE) params.append('minPE', minPE);
+                if (maxPE) params.append('maxPE', maxPE);
+                if (minForwardPE) params.append('minForwardPE', minForwardPE);
+                if (maxForwardPE) params.append('maxForwardPE', maxForwardPE);
+
+                const response = await fetch(`http://localhost:3001/api/v1/stocks/screener?${params}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    stockData = data.data.map(stock => ({
+                        ...stock,
+                        expectedGrowth: calculateExpectedGrowth(stock),
+                        valueScore: calculateValueScore(stock)
+                    }));
+                    renderTable();
+                    updateStats();
+                } else {
+                    showError('Failed to load stocks');
+                }
+            } catch (error) {
+                console.error('Error loading stocks:', error);
+                showError('Error loading stocks: ' + error.message);
+            }
+        }
+
+        function calculateExpectedGrowth(stock) {
+            const peGrowth = stock.pe && stock.forwardPE && stock.pe > 0 
+                ? ((stock.pe - stock.forwardPE) / stock.pe) * 100 
+                : 0;
+            const revenueGrowth = stock.currentRevenue && stock.guidedRevenue && stock.currentRevenue > 0
+                ? ((stock.guidedRevenue - stock.currentRevenue) / stock.currentRevenue) * 100
+                : 0;
+            const epsGrowth = stock.eps && stock.forwardEps && stock.eps > 0
+                ? ((stock.forwardEps - stock.eps) / stock.eps) * 100
+                : 0;
+
+            return (peGrowth * 0.4) + (revenueGrowth * 0.4) + (epsGrowth * 0.2);
+        }
+
+        function calculateValueScore(stock) {
+            let score = 0;
+            
+            // Lower P/E is better (max 30 points)
+            if (stock.pe > 0 && stock.pe < 15) score += 30;
+            else if (stock.pe >= 15 && stock.pe < 20) score += 20;
+            else if (stock.pe >= 20 && stock.pe < 25) score += 10;
+            
+            // Forward P/E lower than current P/E is good (max 20 points)
+            if (stock.forwardPE && stock.pe && stock.forwardPE < stock.pe) {
+                const improvement = (stock.pe - stock.forwardPE) / stock.pe;
+                score += Math.min(improvement * 100, 20);
+            }
+            
+            // Revenue growth (max 25 points)
+            if (stock.revenueGrowth > 0.1) score += 25;
+            else if (stock.revenueGrowth > 0.05) score += 15;
+            else if (stock.revenueGrowth > 0) score += 10;
+            
+            // Low P/B ratio (max 15 points)
+            if (stock.priceToBook < 1) score += 15;
+            else if (stock.priceToBook < 2) score += 10;
+            else if (stock.priceToBook < 3) score += 5;
+            
+            // Low debt (max 10 points)
+            if (stock.debtToEquity < 0.5) score += 10;
+            else if (stock.debtToEquity < 1) score += 5;
+            
+            return Math.round(score);
+        }
+
+        function renderTable() {
+            const sortedData = [...stockData].sort((a, b) => {
+                const aVal = a[currentSort.field];
+                const bVal = b[currentSort.field];
+                const direction = currentSort.direction === 'asc' ? 1 : -1;
+                
+                if (typeof aVal === 'string') {
+                    return aVal.localeCompare(bVal) * direction;
+                }
+                return (aVal - bVal) * direction;
+            });
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable('symbol')">Symbol</th>
+                            <th onclick="sortTable('name')">Name</th>
+                            <th onclick="sortTable('sector')">Sector</th>
+                            <th onclick="sortTable('price')">Price</th>
+                            <th onclick="sortTable('pe')">P/E</th>
+                            <th onclick="sortTable('forwardPE')">Forward P/E</th>
+                            <th onclick="sortTable('revenueGrowth')">Revenue Growth</th>
+                            <th onclick="sortTable('expectedGrowth')">Expected Growth</th>
+                            <th onclick="sortTable('valueScore')">Value Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sortedData.map(stock => `
+                            <tr>
+                                <td><strong>${stock.symbol}</strong></td>
+                                <td>${stock.name}</td>
+                                <td>${stock.sector}</td>
+                                <td>$${stock.price.toFixed(2)}</td>
+                                <td>${stock.pe.toFixed(2)}</td>
+                                <td>${stock.forwardPE.toFixed(2)}</td>
+                                <td class="${stock.revenueGrowth >= 0 ? 'positive' : 'negative'}">
+                                    ${(stock.revenueGrowth * 100).toFixed(1)}%
+                                </td>
+                                <td class="${stock.expectedGrowth >= 0 ? 'positive' : 'negative'}">
+                                    ${stock.expectedGrowth.toFixed(1)}%
+                                </td>
+                                <td>
+                                    <span class="value-score ${getValueScoreClass(stock.valueScore)}">
+                                        ${stock.valueScore}
+                                    </span>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('content').innerHTML = html;
+        }
+
+        function getValueScoreClass(score) {
+            if (score >= 70) return 'high';
+            if (score >= 40) return 'medium';
+            return 'low';
+        }
+
+        function sortTable(field) {
+            if (currentSort.field === field) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.field = field;
+                currentSort.direction = 'asc';
+            }
+            renderTable();
+        }
+
+        function updateStats() {
+            const avgPE = stockData.reduce((sum, s) => sum + s.pe, 0) / stockData.length;
+            const avgGrowth = stockData.reduce((sum, s) => sum + s.expectedGrowth, 0) / stockData.length;
+            const highValue = stockData.filter(s => s.valueScore >= 70).length;
+            
+            document.getElementById('stats').innerHTML = `
+                <strong>Total Stocks:</strong> ${stockData.length} | 
+                <strong>Average P/E:</strong> ${avgPE.toFixed(2)} | 
+                <strong>Average Expected Growth:</strong> ${avgGrowth.toFixed(1)}% | 
+                <strong>High Value Stocks:</strong> ${highValue}
+            `;
+        }
+
+        function showError(message) {
+            document.getElementById('content').innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        function applyFilters() {
+            document.getElementById('content').innerHTML = '<div class="loading">Loading stocks...</div>';
+            loadStocks();
+        }
+
+        // Initialize
+        loadSectors();
+        loadStocks();
+    </script>
+</body>
+</html>
