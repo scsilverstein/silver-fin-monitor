@@ -55,6 +55,19 @@ export class FeedProcessorWorker {
     this.queue.registerHandler(JobType.PREDICTION_COMPARE, async (job: QueueJob) => {
       await this.comparePrediction(job.payload);
     });
+
+    // New job handlers for page-triggered tasks
+    this.queue.registerHandler('feed_fetch_all', async (job: QueueJob) => {
+      await this.processFeedFetchAll(job.payload);
+    });
+
+    this.queue.registerHandler('content_process_check', async (job: QueueJob) => {
+      await this.processContentCheck(job.payload);
+    });
+
+    this.queue.registerHandler('prediction_check', async (job: QueueJob) => {
+      await this.processPredictionCheck(job.payload);
+    });
   }
 
   async start() {
@@ -326,6 +339,159 @@ export class FeedProcessorWorker {
       }
     } catch (error) {
       logger.error('Error processing all feeds:', error);
+    }
+  }
+
+  // New handler methods for page-triggered tasks
+  private async processFeedFetchAll(payload: { 
+    triggeredBy: string; 
+    timestamp: string;
+  }) {
+    try {
+      logger.info(`Processing feed_fetch_all triggered by ${payload.triggeredBy}`);
+      
+      // Check if we need to process all feeds
+      const activeFeeds = await this.db.tables.feedSources.findMany({
+        is_active: true
+      });
+      
+      logger.info(`Found ${activeFeeds.length} active feeds to process`);
+      
+      // Check each feed to see if it needs refreshing
+      for (const feed of activeFeeds) {
+        const feedData = feed as any;
+        const lastProcessed = feedData.last_processed_at;
+        const updateFrequency = feedData.config?.update_frequency || 'hourly';
+        
+        // Calculate if feed needs update based on its frequency
+        const now = new Date();
+        const shouldUpdate = this.shouldUpdateFeed(lastProcessed, updateFrequency, now);
+        
+        if (shouldUpdate) {
+          await this.queue.enqueue(JobType.FEED_FETCH, {
+            sourceId: feedData.id
+          }, {
+            priority: feedData.config?.priority === 'high' ? 1 : 
+                     feedData.config?.priority === 'medium' ? 3 : 5
+          });
+          logger.info(`Queued feed ${feedData.name} for processing`);
+        } else {
+          logger.debug(`Skipping feed ${feedData.name} - recently processed`);
+        }
+      }
+    } catch (error) {
+      logger.error('Error in processFeedFetchAll:', error);
+      throw error;
+    }
+  }
+
+  private async processContentCheck(payload: {
+    triggeredBy: string;
+    timestamp: string;
+  }) {
+    try {
+      logger.info(`Processing content_process_check triggered by ${payload.triggeredBy}`);
+      
+      // Find unprocessed content
+      const unprocessedContent = await this.db.query(`
+        SELECT id FROM processed_content 
+        WHERE (entities IS NULL OR entities = '{}')
+        AND created_at > NOW() - INTERVAL '7 days'
+        LIMIT 50
+      `);
+      
+      logger.info(`Found ${unprocessedContent.length} unprocessed content items`);
+      
+      // Queue them for processing
+      for (const content of unprocessedContent) {
+        await this.queue.enqueue(JobType.CONTENT_PROCESS, {
+          contentId: content.id
+        }, { priority: 5 });
+      }
+      
+      // Also check for raw feeds that haven't been processed
+      const unprocessedFeeds = await this.db.query(`
+        SELECT id, source_id, external_id FROM raw_feeds 
+        WHERE processing_status = 'pending'
+        AND created_at > NOW() - INTERVAL '24 hours'
+        LIMIT 50
+      `);
+      
+      logger.info(`Found ${unprocessedFeeds.length} unprocessed raw feeds`);
+      
+      // Queue them for content processing
+      for (const feed of unprocessedFeeds) {
+        await this.queue.enqueue(JobType.CONTENT_PROCESS, {
+          rawFeedId: feed.id,
+          sourceId: feed.source_id,
+          externalId: feed.external_id
+        }, { priority: 4 });
+      }
+    } catch (error) {
+      logger.error('Error in processContentCheck:', error);
+      throw error;
+    }
+  }
+
+  private async processPredictionCheck(payload: {
+    triggeredBy: string;
+    timestamp: string;
+  }) {
+    try {
+      logger.info(`Processing prediction_check triggered by ${payload.triggeredBy}`);
+      
+      // Check if we need to generate predictions for today
+      const today = new Date().toISOString().split('T')[0];
+      const todayAnalysis = await this.db.tables.dailyAnalysis.findOne({
+        analysis_date: today
+      });
+      
+      if (todayAnalysis) {
+        // Check if predictions exist
+        const predictions = await this.db.query(
+          'SELECT COUNT(*) as count FROM predictions WHERE daily_analysis_id = $1',
+          [(todayAnalysis as any).id]
+        );
+        
+        if (predictions[0].count === 0) {
+          logger.info('No predictions for today, generating...');
+          await this.queue.enqueue('generate_predictions', {
+            analysisId: (todayAnalysis as any).id,
+            analysisDate: today
+          }, { priority: 2 });
+        }
+      }
+      
+      // Also check for due prediction comparisons
+      await this.queuePredictionComparisons(todayAnalysis || { id: null });
+    } catch (error) {
+      logger.error('Error in processPredictionCheck:', error);
+      throw error;
+    }
+  }
+
+  private shouldUpdateFeed(lastProcessed: Date | null, frequency: string, now: Date): boolean {
+    if (!lastProcessed) return true;
+    
+    const lastTime = new Date(lastProcessed).getTime();
+    const nowTime = now.getTime();
+    const diffMinutes = (nowTime - lastTime) / (1000 * 60);
+    
+    switch (frequency) {
+      case '15min':
+        return diffMinutes >= 15;
+      case '30min':
+        return diffMinutes >= 30;
+      case 'hourly':
+        return diffMinutes >= 60;
+      case '4hours':
+        return diffMinutes >= 240;
+      case 'daily':
+        return diffMinutes >= 1440;
+      case 'weekly':
+        return diffMinutes >= 10080;
+      default:
+        return diffMinutes >= 60; // Default to hourly
     }
   }
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AlertCircle, List, LayoutGrid, Play, Pause, Trash2 } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/Alert';
 import { ModernButton } from '@/components/ui/ModernButton';
 import { PageContainer, PageHeader, LoadingState, StatsGrid, createStatItems } from '@/components/layout';
 import { useQueueData } from '@/hooks/useQueueData';
@@ -8,6 +8,7 @@ import { useQueueActions } from '@/hooks/useQueueActions';
 import { useQueueFilters } from '@/hooks/useQueueFilters';
 import { QueueList } from '@/components/queue/QueueList';
 import { QueueTabs } from '@/components/queue/QueueTabs';
+import { QueueFilters } from '@/components/queue/QueueFilters';
 import { WorkerControls } from '@/components/queue/WorkerControls';
 
 const QueueManagement: React.FC = () => {
@@ -40,12 +41,12 @@ const QueueManagement: React.FC = () => {
 
   // Create stats for the queue
   const queueStats = queueData.stats ? [
-    createStatItems.count('pending', 'Pending Jobs', queueData.stats?.pending || 0, {
-      status: (queueData.stats?.pending || 0) > 100 ? 'warning' : 'default',
+    createStatItems.count('pending', 'Pending Jobs', queueData.stats.pending || 0, {
+      status: (queueData.stats.pending || 0) > 100 ? 'warning' : 'default',
       clickable: true,
       onClick: () => clientFilters.setStatusFilter('pending')
     }),
-    createStatItems.count('processing', 'Processing', queueData.stats.processing, {
+    createStatItems.count('processing', 'Processing', queueData?.stats?.processing || 0, {
       status: 'info',
       clickable: true,
       onClick: () => clientFilters.setStatusFilter('processing')
@@ -115,6 +116,30 @@ const QueueManagement: React.FC = () => {
       {/* Worker Controls */}
       <WorkerControls />
 
+      {/* Filters and Sorting */}
+      <QueueFilters
+        statusFilter={clientFilters.statusFilter}
+        jobTypeFilter={clientFilters.jobTypeFilter}
+        priorityFilter={clientFilters.priorityFilter}
+        timeFilter={clientFilters.timeFilter}
+        searchQuery={clientFilters.searchQuery}
+        sortBy={clientFilters.sortBy}
+        availableStatuses={clientFilters.availableStatuses}
+        availableJobTypes={clientFilters.availableJobTypes}
+        onStatusChange={clientFilters.setStatusFilter}
+        onJobTypeChange={clientFilters.setJobTypeFilter}
+        onPriorityChange={clientFilters.setPriorityFilter}
+        onTimeFilterChange={clientFilters.setTimeFilter}
+        onSearchChange={clientFilters.setSearchQuery}
+        onSortChange={clientFilters.setSortBy}
+        getStatusLabel={clientFilters.getStatusLabel}
+        getJobTypeLabel={clientFilters.getJobTypeLabel}
+        getStatusBadgeColor={clientFilters.getStatusBadgeColor}
+        getSortLabel={clientFilters.getSortLabel}
+        getTimeFilterLabel={clientFilters.getTimeFilterLabel}
+        onReset={clientFilters.resetFilters}
+      />
+
       {/* View Mode Toggle */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -141,8 +166,15 @@ const QueueManagement: React.FC = () => {
           </div>
         </div>
         
-        <div className="text-sm text-muted-foreground">
-          {clientFilters.filteredJobs.length} of {queueData.jobs.length} jobs
+        <div className="text-sm text-muted-foreground space-x-4">
+          <span>
+            Showing {clientFilters.filteredJobs.length} of {queueData.jobs.length} jobs
+          </span>
+          {clientFilters.filteredJobs.length !== queueData.jobs.length && (
+            <span className="text-blue-600">
+              ({queueData.jobs.length - clientFilters.filteredJobs.length} filtered out)
+            </span>
+          )}
         </div>
       </div>
 

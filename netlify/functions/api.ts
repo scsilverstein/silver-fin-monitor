@@ -1,6 +1,8 @@
 import { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
 import { createClient } from '@supabase/supabase-js';
 
+// Updated: 2025-08-05 - Added content filtering
+
 interface ApiResponse {
   success: boolean;
   data?: any;
@@ -320,7 +322,8 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
         service: 'silver-fin-monitor-netlify',
         environment: 'netlify',
         path: apiPath,
-        originalPath: path
+        originalPath: path,
+        version: '1.0.1' // Updated to trigger reload
       }
     });
   }
@@ -1090,16 +1093,86 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     }
     
     try {
-      const { data: content, error } = await supabase
+      // Parse query parameters
+      const url = new URL(event.rawUrl);
+      const limit = parseInt(url.searchParams.get('limit') || '10000');
+      const offset = parseInt(url.searchParams.get('offset') || '0');
+      const sentiment = url.searchParams.get('sentiment');
+      const timeframe = url.searchParams.get('timeframe');
+      const sortBy = url.searchParams.get('sortBy') || 'date';
+      const sortOrder = url.searchParams.get('sortOrder') || 'desc';
+      
+      // Build query
+      let query = supabase
         .from('processed_content')
-        .select('*')
-        .order('created_at', { ascending: false })
+        .select('*', { count: 'exact' });
+      
+      // Apply timeframe filter
+      if (timeframe && timeframe !== 'all') {
+        const now = new Date();
+        let startDate: Date | null = null;
+        
+        switch (timeframe) {
+          case '1d':
+            startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            break;
+          case '7d':
+            startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            break;
+          case '30d':
+            startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            break;
+          case '90d':
+            startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+            break;
+        }
+        
+        if (startDate) {
+          query = query.gte('created_at', startDate.toISOString());
+        }
+      }
+      
+      // Apply sentiment filter
+      if (sentiment) {
+        const sentimentRange = {
+          positive: [0.3, 1],
+          negative: [-1, -0.3],
+          neutral: [-0.3, 0.3]
+        };
+        const range = sentimentRange[sentiment as keyof typeof sentimentRange];
+        if (range) {
+          query = query.gte('sentiment_score', range[0]).lte('sentiment_score', range[1]);
+        }
+      }
+      
+      // Apply ordering and pagination
+      const orderColumn = sortBy === 'sentiment' ? 'sentiment_score' : 'created_at';
+      const ascending = sortOrder === 'asc';
+      
+      query = query
+        .order(orderColumn, { ascending })
+        .range(offset, offset + limit - 1);
+      
+      const { data: content, error, count } = await query;
       
       if (error) throw error;
       
       return createResponse(200, {
         success: true,
-        data: content || []
+        data: content || [],
+        meta: {
+          total: count || 0,
+          page: Math.floor(offset / limit) + 1,
+          limit: limit,
+          filters: {
+            timeframe: timeframe || 'all',
+            sentiment: sentiment || null
+          },
+          sort: {
+            by: sortBy,
+            order: sortOrder
+          }
+        }
       });
     } catch (error) {
       return createResponse(500, {
@@ -1190,6 +1263,65 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
       return createResponse(500, {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to fetch queue jobs'
+      });
+    }
+  }
+
+  // POST /queue/jobs - Create new queue job
+  if ((apiPath.includes('/queue/jobs') || apiPath === '/api/v1/queue/jobs') && httpMethod === 'POST') {
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: 'Database connection not configured'
+      });
+    }
+
+    try {
+      const requestBody = JSON.parse(body || '{}');
+      const { jobType, payload = {}, priority = 5, delaySeconds = 0 } = requestBody;
+
+      if (!jobType) {
+        return createResponse(400, {
+          success: false,
+          error: 'jobType is required'
+        });
+      }
+
+      // Calculate scheduled time
+      const scheduledAt = new Date();
+      if (delaySeconds > 0) {
+        scheduledAt.setSeconds(scheduledAt.getSeconds() + delaySeconds);
+      }
+
+      // Insert the job into the queue
+      const { data: jobData, error } = await supabase
+        .from('job_queue')
+        .insert({
+          job_type: jobType,
+          payload: payload,
+          priority: priority,
+          status: 'pending',
+          attempts: 0,
+          max_attempts: 3,
+          scheduled_at: scheduledAt.toISOString(),
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours from now
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return createResponse(200, {
+        success: true,
+        data: {
+          jobId: jobData.id,
+          message: `Job ${jobType} queued successfully`
+        }
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create queue job'
       });
     }
   }
@@ -2197,8 +2329,7 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     if (!hasAuth) {
       return createResponse(401, {
         success: false,
-        error: 'Authorization required. Use "Bearer demo-token" for testing or a valid JWT token.',
-        hint: 'Add Authorization header with value "Bearer demo-token" to test this endpoint'
+        error: 'Authorization required. Use "Bearer demo-token" for testing or a valid JWT token.'
       });
     }
     
@@ -2210,7 +2341,7 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     }
     
     try {
-      let requestBody = {};
+      let requestBody: { date?: string; force?: boolean } = {};
       try {
         requestBody = JSON.parse(body || '{}');
       } catch (e) {
@@ -2440,6 +2571,441 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     }
   }
   
+  // Entity Analytics endpoints - REAL DATA
+  if (apiPath.includes('/entity-analytics/dashboard') || apiPath === '/api/v1/entity-analytics/dashboard') {
+    if (!supabase) {
+      return createResponse(503, {
+        success: false,
+        error: 'Database not available'
+      });
+    }
+    
+    try {
+      // Get time range parameters
+      const url = new URL(event.path, 'https://example.com');
+      const startParam = url.searchParams.get('start');
+      const endParam = url.searchParams.get('end');
+      
+      // Default to last 7 days if no range provided
+      const endDate = endParam ? new Date(endParam) : new Date();
+      const startDate = startParam ? new Date(startParam) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      
+      // Get processed content with entities
+      const { data: contentWithEntities, error } = await supabase
+        .from('processed_content')
+        .select(`
+          id,
+          entities,
+          sentiment_score,
+          raw_feed_id,
+          created_at
+        `)
+        .gte('created_at', startDate.toISOString())
+        .lte('created_at', endDate.toISOString())
+        .not('entities', 'is', null)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Entity analytics query error:', error);
+        return createResponse(500, {
+          success: false,
+          error: 'Failed to fetch entity data'
+        });
+      }
+      
+      // Process entities in JavaScript
+      const entityCounts = new Map();
+      const allSentiments = [];
+      
+      (contentWithEntities || []).forEach(row => {
+        const entities = row.entities;
+        const sentiment = parseFloat(row.sentiment_score) || 0;
+        allSentiments.push(sentiment);
+        
+        if (entities && typeof entities === 'object') {
+          // Handle new format: {companies: [], tickers: [], people: [], locations: []}
+          Object.entries(entities).forEach(([type, entityList]) => {
+            if (Array.isArray(entityList)) {
+              const entityType = type === 'companies' ? 'company' : 
+                              type === 'tickers' ? 'ticker' :
+                              type === 'people' ? 'person' :
+                              type === 'locations' ? 'location' : type;
+              
+              entityList.forEach(entityName => {
+                if (entityName && entityName.length > 1) {
+                  const key = `${entityName}:${entityType}`;
+                  if (!entityCounts.has(key)) {
+                    entityCounts.set(key, {
+                      entityName,
+                      entityType,
+                      totalMentions: 0,
+                      overallSentiment: 0,
+                      sentiments: []
+                    });
+                  }
+                  const entry = entityCounts.get(key);
+                  entry.totalMentions++;
+                  entry.sentiments.push(sentiment);
+                }
+              });
+            }
+          });
+        }
+      });
+      
+      // Calculate averages and create final data
+      const topTrending = Array.from(entityCounts.values())
+        .map(entry => ({
+          entityName: entry.entityName,
+          entityType: entry.entityType,
+          totalMentions: entry.totalMentions,
+          overallSentiment: entry.sentiments.length > 0 
+            ? entry.sentiments.reduce((a, b) => a + b, 0) / entry.sentiments.length 
+            : 0,
+          trendingScore: entry.totalMentions * Math.max(0.1, Math.abs(entry.sentiments.reduce((a, b) => a + b, 0) / entry.sentiments.length))
+        }))
+        .sort((a, b) => b.trendingScore - a.trendingScore)
+        .slice(0, 20);
+      
+      const sentimentLeaders = topTrending
+        .filter(e => e.overallSentiment > 0.2)
+        .sort((a, b) => b.overallSentiment - a.overallSentiment)
+        .slice(0, 10);
+      
+      const dashboardData = {
+        topTrending,
+        sentimentLeaders,
+        totalEntitiesTracked: entityCounts.size,
+        totalMentionsToday: topTrending.reduce((sum, e) => sum + e.totalMentions, 0),
+        averageSentimentToday: allSentiments.length > 0 
+          ? allSentiments.reduce((a, b) => a + b, 0) / allSentiments.length 
+          : 0
+      };
+      
+      return createResponse(200, {
+        success: true,
+        data: dashboardData
+      });
+      
+    } catch (error) {
+      console.error('Entity analytics dashboard error:', error);
+      return createResponse(500, {
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+  
+  // Entity details endpoint
+  if (apiPath.match(/\/entity-analytics\/entity\/[^\/]+$/) || apiPath.match(/\/api\/v1\/entity-analytics\/entity\/[^\/]+$/)) {
+    if (!supabase) {
+      return createResponse(503, {
+        success: false,
+        error: 'Database not available'
+      });
+    }
+    
+    try {
+      const entityName = decodeURIComponent(apiPath.split('/').pop() || '');
+      
+      if (!entityName) {
+        return createResponse(400, {
+          success: false,
+          error: 'Entity name is required'
+        });
+      }
+      
+      // Get entity data from processed content
+      const { data: entityData, error } = await supabase
+        .from('processed_content')
+        .select(`
+          id,
+          entities,
+          sentiment_score,
+          created_at
+        `)
+        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()) // Last 30 days
+        .not('entities', 'is', null);
+      
+      if (error) {
+        console.error('Entity data query error:', error);
+        return createResponse(500, {
+          success: false,
+          error: 'Failed to fetch entity data'
+        });
+      }
+      
+      // Filter and process data for this specific entity
+      const entityMentions = [];
+      const historicalData = new Map();
+      
+      (entityData || []).forEach(row => {
+        const entities = row.entities;
+        const sentiment = parseFloat(row.sentiment_score) || 0;
+        const date = new Date(row.created_at).toISOString().split('T')[0];
+        
+        let found = false;
+        if (entities && typeof entities === 'object') {
+          Object.entries(entities).forEach(([type, entityList]) => {
+            if (Array.isArray(entityList) && entityList.includes(entityName)) {
+              found = true;
+            }
+          });
+        }
+        
+        if (found) {
+          entityMentions.push({
+            date: row.created_at,
+            sentiment,
+            mentionCount: 1
+          });
+          
+          // Group by date for historical chart
+          if (!historicalData.has(date)) {
+            historicalData.set(date, { sentiment: 0, count: 0 });
+          }
+          const dayData = historicalData.get(date);
+          dayData.sentiment += sentiment;
+          dayData.count += 1;
+        }
+      });
+      
+      // Create historical mentions array
+      const historicalMentions = Array.from(historicalData.entries())
+        .map(([date, data]) => ({
+          date,
+          sentiment: data.sentiment / data.count,
+          mentionCount: data.count
+        }))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
+      const entityAnalytics = {
+        entityName,
+        entityType: 'company', // Default type
+        totalMentions: entityMentions.length,
+        overallSentiment: entityMentions.length > 0 
+          ? entityMentions.reduce((sum, m) => sum + m.sentiment, 0) / entityMentions.length 
+          : 0,
+        trendingScore: entityMentions.length * 2, // Simple scoring
+        historicalMentions
+      };
+      
+      return createResponse(200, {
+        success: true,
+        data: entityAnalytics
+      });
+      
+    } catch (error) {
+      console.error('Entity details error:', error);
+      return createResponse(500, {
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+  
+  // Entity mentions endpoint
+  if (apiPath.match(/\/entity-analytics\/entity\/[^\/]+\/mentions$/) || apiPath.match(/\/api\/v1\/entity-analytics\/entity\/[^\/]+\/mentions$/)) {
+    if (!supabase) {
+      return createResponse(503, {
+        success: false,
+        error: 'Database not available'
+      });
+    }
+    
+    try {
+      const pathParts = apiPath.split('/');
+      const entityName = decodeURIComponent(pathParts[pathParts.length - 2] || '');
+      
+      // Get query parameters
+      const url = new URL(event.path + (event.queryStringParameters ? '?' + new URLSearchParams(event.queryStringParameters).toString() : ''), 'https://example.com');
+      const limit = parseInt(url.searchParams.get('limit') || '20');
+      const offset = parseInt(url.searchParams.get('offset') || '0');
+      
+      if (!entityName) {
+        return createResponse(400, {
+          success: false,
+          error: 'Entity name is required'
+        });
+      }
+      
+      // Get mentions with context - search in entities field
+      const { data: mentionData, error } = await supabase
+        .from('processed_content')
+        .select(`
+          id,
+          summary,
+          entities,
+          sentiment_score,
+          created_at,
+          raw_feeds!inner(
+            title,
+            published_at,
+            feed_sources!inner(
+              name,
+              type
+            )
+          )
+        `)
+        .not('entities', 'is', null)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Entity mentions query error:', error);
+        return createResponse(500, {
+          success: false,
+          error: 'Failed to fetch mentions'
+        });
+      }
+      
+      // Filter results to only include content that mentions the specific entity
+      const filteredMentions = (mentionData || []).filter(item => {
+        const entities = item.entities;
+        if (!entities || typeof entities !== 'object') return false;
+        
+        // Check if entity exists in any category
+        return Object.values(entities).some(entityList => 
+          Array.isArray(entityList) && 
+          entityList.some(entity => 
+            entity && entity.toLowerCase().includes(entityName.toLowerCase())
+          )
+        );
+      });
+      
+      // Apply pagination to filtered results
+      const paginatedMentions = filteredMentions
+        .slice(offset, offset + limit)
+        .map(item => ({
+          id: item.id,
+          mentionDate: item.created_at,
+          contentSummary: item.summary || `Content mentioning ${entityName}`,
+          sentiment: parseFloat(item.sentiment_score) || 0,
+          source: {
+            name: item.raw_feeds?.feed_sources?.name || 'Unknown',
+            type: item.raw_feeds?.feed_sources?.type || 'unknown'
+          },
+          title: item.raw_feeds?.title || 'Untitled',
+          publishedAt: item.raw_feeds?.published_at || item.created_at
+        }));
+      
+      return createResponse(200, {
+        success: true,
+        data: {
+          mentions: paginatedMentions,
+          total: filteredMentions.length
+        }
+      });
+      
+    } catch (error) {
+      console.error('Entity mentions error:', error);
+      return createResponse(500, {
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+  
+  // Entity search endpoint
+  if (apiPath.includes('/entity-analytics/search') || apiPath === '/api/v1/entity-analytics/search') {
+    if (!supabase) {
+      return createResponse(503, {
+        success: false,
+        error: 'Database not available'
+      });
+    }
+    
+    try {
+      const url = new URL(event.path + (event.queryStringParameters ? '?' + new URLSearchParams(event.queryStringParameters).toString() : ''), 'https://example.com');
+      const query = url.searchParams.get('q') || '';
+      const limit = parseInt(url.searchParams.get('limit') || '10');
+      
+      if (!query) {
+        return createResponse(400, {
+          success: false,
+          error: 'Query parameter q is required'
+        });
+      }
+      
+      // Search in processed content
+      const { data: searchResults, error } = await supabase
+        .from('processed_content')
+        .select(`
+          entities,
+          sentiment_score
+        `)
+        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+        .not('entities', 'is', null);
+      
+      if (error) {
+        console.error('Entity search query error:', error);
+        return createResponse(500, {
+          success: false,
+          error: 'Failed to search entities'
+        });
+      }
+      
+      // Process search results
+      const entityMatches = new Map();
+      
+      (searchResults || []).forEach(row => {
+        const entities = row.entities;
+        const sentiment = parseFloat(row.sentiment_score) || 0;
+        
+        if (entities && typeof entities === 'object') {
+          Object.entries(entities).forEach(([type, entityList]) => {
+            if (Array.isArray(entityList)) {
+              const entityType = type === 'companies' ? 'company' : 
+                              type === 'tickers' ? 'ticker' :
+                              type === 'people' ? 'person' :
+                              type === 'locations' ? 'location' : type;
+              
+              entityList.forEach(entityName => {
+                if (entityName && entityName.toLowerCase().includes(query.toLowerCase())) {
+                  const key = `${entityName}:${entityType}`;
+                  if (!entityMatches.has(key)) {
+                    entityMatches.set(key, {
+                      entityName,
+                      entityType,
+                      mentionCount: 0,
+                      sentiments: []
+                    });
+                  }
+                  const match = entityMatches.get(key);
+                  match.mentionCount++;
+                  match.sentiments.push(sentiment);
+                }
+              });
+            }
+          });
+        }
+      });
+      
+      const results = Array.from(entityMatches.values())
+        .map(match => ({
+          entityName: match.entityName,
+          entityType: match.entityType,
+          mentionCount: match.mentionCount,
+          recentSentiment: match.sentiments.length > 0 
+            ? match.sentiments.reduce((a, b) => a + b, 0) / match.sentiments.length 
+            : 0
+        }))
+        .sort((a, b) => b.mentionCount - a.mentionCount)
+        .slice(0, limit);
+      
+      return createResponse(200, {
+        success: true,
+        data: results
+      });
+      
+    } catch (error) {
+      console.error('Entity search error:', error);
+      return createResponse(500, {
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+  
   
   // List all available endpoints
   if (apiPath === '/api/v1' || apiPath === '/') {
@@ -2466,7 +3032,12 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
           'GET /api/v1/content',
           'GET /api/v1/dashboard/stats',
           'GET /api/v1/queue/status',
+          'GET /api/v1/entity-analytics/dashboard',
+          'GET /api/v1/entity-analytics/entity/{name}',
+          'GET /api/v1/entity-analytics/entity/{name}/mentions',
+          'GET /api/v1/entity-analytics/search?q={query}',
           'GET /api/v1/queue/jobs',
+          'POST /api/v1/queue/jobs',
           'GET /api/v1/queue/stats',
           'GET /api/v1/queue/worker/status',
           'POST /api/v1/queue/worker/start',

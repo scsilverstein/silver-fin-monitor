@@ -10,25 +10,63 @@ export const useContentData = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [currentFilters, setCurrentFilters] = useState<{ sentiment?: string | null; timeframe?: string | null; sortBy?: string; sortOrder?: string }>({ sentiment: null, timeframe: 'all', sortBy: 'date', sortOrder: 'desc' });
   
-  const limit = 10000; // Increased from 20 to show more content
+  const limit = 10000; // Show all content without pagination
 
   const loadContent = useCallback(async (
     pageNum = currentPage, 
     sentiment?: string | null,
-    timeframe?: string | null
+    timeframe?: string | null,
+    sortBy?: string,
+    sortOrder?: string
   ) => {
     try {
       setError(null);
+      let effectiveSentiment = currentFilters.sentiment;
+      let effectiveTimeframe = currentFilters.timeframe;
+      
+      let effectiveSortBy = currentFilters.sortBy;
+      let effectiveSortOrder = currentFilters.sortOrder;
+      
+      // Update current filters if provided
+      if (sentiment !== undefined || timeframe !== undefined || sortBy !== undefined || sortOrder !== undefined) {
+        const newFilters = {
+          sentiment: sentiment !== undefined ? sentiment : currentFilters.sentiment,
+          timeframe: timeframe !== undefined ? timeframe : currentFilters.timeframe,
+          sortBy: sortBy !== undefined ? sortBy : currentFilters.sortBy,
+          sortOrder: sortOrder !== undefined ? sortOrder : currentFilters.sortOrder
+        };
+        setCurrentFilters(newFilters);
+        
+        // Use the new filters
+        effectiveSentiment = newFilters.sentiment;
+        effectiveTimeframe = newFilters.timeframe;
+        effectiveSortBy = newFilters.sortBy;
+        effectiveSortOrder = newFilters.sortOrder;
+      }
+      
       const params = {
         limit,
         offset: (pageNum - 1) * limit,
-        ...(sentiment && { sentiment }),
-        ...(timeframe && timeframe !== 'all' && { timeframe })
+        ...(effectiveSentiment && { sentiment: effectiveSentiment }),
+        ...(effectiveTimeframe && effectiveTimeframe !== 'all' && { timeframe: effectiveTimeframe }),
+        ...(effectiveSortBy && { sortBy: effectiveSortBy }),
+        ...(effectiveSortOrder && { sortOrder: effectiveSortOrder })
       };
+      
+      console.log('Loading content with params:', params);
+      console.log('Current filters state:', { sentiment, timeframe, effectiveSentiment, effectiveTimeframe });
+      setLoading(true);
       
       // Make the API call and get full response with metadata
       const response = await api.get<ApiResponse<ProcessedContent[] | { content: ProcessedContent[]; total: number; page: number; pageSize?: number }>>('/content', { params });
+      
+      console.log('API Response:', {
+        success: response.data.success,
+        dataLength: Array.isArray(response.data.data) ? response.data.data.length : response.data.data?.content?.length,
+        meta: response.data.meta
+      });
       
       if (response.data.success && response.data.data) {
         // Handle both formats: direct array or nested object with content property
@@ -78,14 +116,16 @@ export const useContentData = () => {
     }
   }, []);
 
-  const refreshContent = useCallback(async (sentiment?: string | null, timeframe?: string | null) => {
+  const refreshContent = useCallback(async (sentiment?: string | null, timeframe?: string | null, sortBy?: string, sortOrder?: string) => {
     setRefreshing(true);
+    setCurrentPage(1); // Reset to first page when filters change
+    setContent([]); // Clear content to show loading state
     await Promise.all([
-      loadContent(currentPage, sentiment, timeframe),
+      loadContent(1, sentiment, timeframe, sortBy, sortOrder),
       loadStats()
     ]);
     setRefreshing(false);
-  }, [currentPage, loadContent, loadStats]);
+  }, [loadContent, loadStats]);
 
   const loadNextPage = useCallback(() => {
     if (currentPage < totalPages) {
@@ -104,8 +144,10 @@ export const useContentData = () => {
   }, [currentPage, loadContent]);
 
   useEffect(() => {
-    loadContent();
+    // Load with initial filter values
+    loadContent(1, currentFilters.sentiment, currentFilters.timeframe);
     loadStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run on mount
 
   return {

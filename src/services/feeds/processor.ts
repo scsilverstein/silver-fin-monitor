@@ -134,6 +134,11 @@ export async function processFeed(sourceId: string): Promise<void> {
       .eq('id', sourceId);
 
     logger.info('Feed processing completed', { sourceId, itemsProcessed: newItems.length });
+
+    // If we processed significant new items, check if we should trigger analysis
+    if (newItems.length >= 3) {
+      await checkAndTriggerAnalysisDependency(newItems.length);
+    }
   } catch (error) {
     logger.error('Feed processing failed', { sourceId, error });
     throw error;
@@ -161,5 +166,86 @@ export async function processAllActiveFeeds(): Promise<void> {
   } catch (error) {
     logger.error('Failed to process active feeds', { error });
     throw error;
+  }
+}
+
+/**
+ * Check if we should trigger analysis after significant feed processing
+ */
+async function checkAndTriggerAnalysisDependency(newItemsCount: number): Promise<void> {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const currentHour = now.getUTCHours();
+
+    // Check if daily analysis exists for today
+    const { data: existingAnalysis } = await supabase
+      .from('daily_analysis')
+      .select('id, created_at')
+      .eq('analysis_date', today)
+      .single();
+
+    // Count total processed content today to see if we have enough
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const { data: todayContent } = await supabase
+      .from('processed_content')
+      .select('id')
+      .gte('created_at', startOfDay);
+
+    const todayContentCount = todayContent?.length || 0;
+
+    logger.info('Feed dependency check', { 
+      today, 
+      currentHour, 
+      newItemsCount,
+      todayContentCount,
+      hasExistingAnalysis: !!existingAnalysis 
+    });
+
+    // TRIGGER CONDITIONS for analysis after feed processing:
+    const shouldTriggerAnalysis = (
+      // 1. No analysis today AND we have meaningful content (8+ items total)
+      (!existingAnalysis && todayContentCount >= 8) ||
+      
+      // 2. It's business hours (6 AM - 10 PM UTC) AND no analysis exists
+      (currentHour >= 6 && currentHour <= 22 && !existingAnalysis && todayContentCount >= 5) ||
+      
+      // 3. Analysis is very old (12+ hours) AND we have fresh content
+      (existingAnalysis && 
+       new Date(existingAnalysis.created_at).getTime() < Date.now() - 12 * 60 * 60 * 1000 &&
+       todayContentCount >= 10)
+    );
+
+    if (shouldTriggerAnalysis) {
+      // Check if analysis job is already queued
+      const { data: existingJobs } = await supabase
+        .from('job_queue')
+        .select('id')
+        .eq('job_type', 'daily_analysis')
+        .in('status', ['pending', 'processing', 'retry'])
+        .contains('payload', { date: today });
+
+      if (!existingJobs || existingJobs.length === 0) {
+        // Queue analysis job
+        const analysisJobId = await queueService.enqueue('daily_analysis', {
+          date: today,
+          forceRegenerate: !!existingAnalysis,
+          source: 'feed_dependency_trigger',
+          contentCount: todayContentCount,
+          triggerItemsCount: newItemsCount
+        }, 2); // Medium priority (let content processing finish first)
+
+        logger.info('🧠 Queued daily analysis from feed dependency trigger', {
+          today,
+          analysisJobId,
+          todayContentCount,
+          newItemsCount
+        });
+      }
+    }
+
+  } catch (error) {
+    logger.error('Failed to check analysis dependency after feed processing', { error });
+    // Don't throw - this shouldn't fail feed processing
   }
 }

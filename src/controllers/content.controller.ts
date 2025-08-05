@@ -22,13 +22,26 @@ export class ContentController {
       offset = 0 
     } = req.query;
     
-    contentLogger.debug('Listing content', { sourceId, startDate, endDate, sentiment, limit, offset });
+    contentLogger.debug('Listing content - raw query params', req.query);
+    contentLogger.debug('Listing content - parsed params', { sourceId, startDate, endDate, sentiment, timeframe, limit, offset });
 
     // Calculate date range from timeframe
-    let calculatedStartDate = startDate;
-    let calculatedEndDate = endDate;
+    let calculatedStartDate = startDate as string | undefined;
+    let calculatedEndDate = endDate as string | undefined;
     
-    if (timeframe && !startDate && !endDate) {
+    // Convert empty strings to undefined
+    if (calculatedStartDate === '') calculatedStartDate = undefined;
+    if (calculatedEndDate === '') calculatedEndDate = undefined;
+    
+    contentLogger.debug('Date calculation check', { 
+      timeframe, 
+      hasStartDate: !!calculatedStartDate, 
+      hasEndDate: !!calculatedEndDate,
+      willCalculateDates: !!(timeframe && !calculatedStartDate && !calculatedEndDate)
+    });
+    
+    // Only use timeframe if explicit dates aren't provided
+    if (timeframe && !calculatedStartDate && !calculatedEndDate) {
       const now = new Date();
       calculatedEndDate = now.toISOString();
       
@@ -42,12 +55,28 @@ export class ContentController {
         case '30d':
           calculatedStartDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
           break;
+        case '90d':
+          calculatedStartDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+          break;
         default:
           // 'all' - no date filter
           calculatedStartDate = undefined;
           calculatedEndDate = undefined;
           break;
       }
+      
+      contentLogger.debug('Dates calculated from timeframe', { 
+        timeframe,
+        calculatedStartDate,
+        calculatedEndDate
+      });
+    } else {
+      contentLogger.debug('Skipped date calculation', { 
+        reason: 'Either no timeframe or dates already provided',
+        timeframe,
+        startDate: calculatedStartDate,
+        endDate: calculatedEndDate
+      });
     }
 
     // Build cache key
@@ -58,6 +87,7 @@ export class ContentController {
     // Try cache first
     const cached = await cache.get<{ content: ProcessedContent[]; total: number }>(cacheKey);
     if (cached) {
+      contentLogger.debug('Returning cached content', { cacheKey });
       res.json({
         success: true,
         data: cached.content,
@@ -79,28 +109,27 @@ export class ContentController {
         .from('processed_content')
         .select('*', { count: 'exact' });
 
+      // Apply date filtering directly on processed_content table
+      if (calculatedStartDate) {
+        contentLogger.debug('Applying start date filter', { calculatedStartDate });
+        query = query.gte('created_at', calculatedStartDate);
+      }
+      if (calculatedEndDate) {
+        contentLogger.debug('Applying end date filter', { calculatedEndDate });
+        query = query.lte('created_at', calculatedEndDate);
+      }
+
       // For source filtering, we need to get raw_feed_ids first
-      let rawFeedIds: string[] | null = null;
-      if (sourceId || calculatedStartDate || calculatedEndDate) {
-        // Get raw feed IDs that match our criteria
-        let feedQuery = client.from('raw_feeds').select('id');
-        
-        if (sourceId) {
-          feedQuery = feedQuery.eq('source_id', sourceId);
-        }
-        if (calculatedStartDate) {
-          feedQuery = feedQuery.gte('published_at', calculatedStartDate);
-        }
-        if (calculatedEndDate) {
-          feedQuery = feedQuery.lte('published_at', calculatedEndDate);
-        }
+      if (sourceId) {
+        // Get raw feed IDs that match our source
+        const feedQuery = client.from('raw_feeds').select('id').eq('source_id', sourceId);
         
         const { data: feeds, error: feedError } = await feedQuery;
         if (feedError) {
           throw new Error(`Failed to fetch raw feeds: ${feedError.message}`);
         }
         
-        rawFeedIds = feeds?.map(f => f.id) || [];
+        const rawFeedIds = feeds?.map(f => f.id) || [];
         
         // If we have feed IDs, filter by them
         if (rawFeedIds.length > 0) {
@@ -121,6 +150,7 @@ export class ContentController {
       }
 
       if (sentiment) {
+        contentLogger.debug('Applying sentiment filter', { sentiment });
         const sentimentRange = {
           positive: [0.3, 1],
           negative: [-1, -0.3],
@@ -128,6 +158,7 @@ export class ContentController {
         };
         const range = sentimentRange[sentiment as keyof typeof sentimentRange];
         if (range) {
+          contentLogger.debug('Sentiment range', { range });
           query = query.gte('sentiment_score', range[0]).lte('sentiment_score', range[1]);
         }
       }
@@ -140,12 +171,23 @@ export class ContentController {
         .range(Number(offset), Number(offset) + Number(limit) - 1);
 
       // Execute query
+      contentLogger.debug('Executing query with filters', { 
+        hasDateFilter: !!calculatedStartDate || !!calculatedEndDate,
+        hasSentimentFilter: !!sentiment,
+        hasSourceFilter: !!sourceId 
+      });
+      
       const { data: content, error, count: total } = await query;
 
       if (error) {
         contentLogger.error('Failed to fetch content', { error });
         throw new Error(`Failed to fetch content: ${error.message}`);
       }
+      
+      contentLogger.debug('Query results', { 
+        resultCount: content?.length || 0, 
+        totalCount: total || 0 
+      });
 
       // Transform the data structure - no nested data now
       const transformedContent = (content || []).map(item => ({

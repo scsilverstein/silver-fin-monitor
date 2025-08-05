@@ -261,6 +261,139 @@ export class AlphaVantageProvider implements StockDataProvider {
   }
 }
 
+// Polygon Provider (Primary)
+export class PolygonProvider implements StockDataProvider {
+  name = 'Polygon.io';
+  priority = 1;
+  private circuitBreaker: CircuitBreaker;
+  private baseUrl = 'https://api.polygon.io';
+  private apiKey: string;
+
+  constructor(private logger: winston.Logger, apiKey: string) {
+    this.apiKey = apiKey;
+    this.circuitBreaker = new CircuitBreaker(
+      'PolygonProvider',
+      this.logger,
+      {
+        failureThreshold: 5,
+        resetTimeout: 300000, // 5 minutes
+        monitoringPeriod: 600000 // 10 minutes
+      }
+    );
+  }
+
+  async isHealthy(): Promise<boolean> {
+    return this.circuitBreaker.getState() !== CircuitState.OPEN && !!this.apiKey;
+  }
+
+  async fetchFundamentals(symbol: string): Promise<StockFundamentals> {
+    return this.circuitBreaker.execute(async () => {
+      try {
+        // Get current snapshot data
+        const snapshotResponse = await axios.get(`${this.baseUrl}/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`, {
+          params: { apikey: this.apiKey },
+          timeout: 10000
+        });
+
+        if (snapshotResponse.data.status !== 'OK' || !snapshotResponse.data.results) {
+          throw new Error(`Polygon snapshot error: ${snapshotResponse.data.status}`);
+        }
+
+        const snapshot = snapshotResponse.data.results;
+        
+        // Get company details for additional info
+        let companyDetails = null;
+        try {
+          const detailsResponse = await axios.get(`${this.baseUrl}/v3/reference/tickers/${symbol}`, {
+            params: { apikey: this.apiKey },
+            timeout: 10000
+          });
+          
+          if (detailsResponse.data.status === 'OK' && detailsResponse.data.results) {
+            companyDetails = detailsResponse.data.results;
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to fetch company details for ${symbol}`, error);
+        }
+
+        return this.parsePolygonData(symbol, snapshot, companyDetails);
+      } catch (error) {
+        this.logger.error('Polygon fetch error', { symbol, error });
+        throw error;
+      }
+    });
+  }
+
+  async fetchBulkFundamentals(symbols: string[]): Promise<Map<string, StockFundamentals>> {
+    const results = new Map<string, StockFundamentals>();
+    
+    // Process in smaller batches to respect rate limits
+    const batchSize = 5;
+    const delay = 1200; // 1.2 seconds between batches for free tier
+
+    for (let i = 0; i < symbols.length; i += batchSize) {
+      const batch = symbols.slice(i, i + batchSize);
+      const batchPromises = batch.map(symbol => 
+        this.fetchFundamentals(symbol)
+          .then(data => results.set(symbol, data))
+          .catch(error => {
+            this.logger.error(`Failed to fetch ${symbol}`, error);
+            results.set(symbol, null);
+          })
+      );
+
+      await Promise.all(batchPromises);
+      
+      if (i + batchSize < symbols.length) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    return results;
+  }
+
+  private parsePolygonData(symbol: string, snapshot: any, companyDetails: any): StockFundamentals {
+    // Extract current price and volume from snapshot
+    const currentPrice = snapshot.last_trade?.price || snapshot.session?.close || snapshot.value || 0;
+    const volume = snapshot.session?.volume || snapshot.min?.v || 0;
+    const dayHigh = snapshot.session?.high || snapshot.min?.h || currentPrice;
+    const dayLow = snapshot.session?.low || snapshot.min?.l || currentPrice;
+    const previousClose = snapshot.session?.previous_close || snapshot.prevDay?.c || currentPrice;
+
+    // Market cap from company details
+    const marketCap = companyDetails?.market_cap || 0;
+    const sharesOutstanding = companyDetails?.share_class_shares_outstanding || 0;
+
+    // Basic calculations (forward/trailing data would come from earnings integration)
+    return {
+      symbol,
+      date: new Date(),
+      price: currentPrice,
+      marketCap,
+      forwardPE: undefined, // Will be calculated from earnings calendar
+      trailingPE: undefined, // Will be calculated from financials
+      forwardEPS: undefined, // Will come from earnings calendar
+      trailingEPS: undefined, // Will come from financials
+      revenue: undefined, // Will come from financials
+      earnings: undefined, // Will come from financials
+      volume,
+      dayHigh,
+      dayLow,
+      fiftyTwoWeekHigh: dayHigh, // Would need historical data endpoint
+      fiftyTwoWeekLow: dayLow,   // Would need historical data endpoint
+      metadata: {
+        currency: 'USD',
+        exchange: snapshot.market || companyDetails?.primary_exchange,
+        companyName: companyDetails?.name,
+        sector: companyDetails?.sic_description,
+        sharesOutstanding,
+        lastUpdated: new Date(snapshot.updated || Date.now()).toISOString(),
+        dataSource: 'polygon'
+      }
+    };
+  }
+}
+
 // Main Stock Data Fetcher with fallback
 export class StockDataFetcher {
   private providers: StockDataProvider[] = [];
@@ -272,10 +405,15 @@ export class StockDataFetcher {
     if (providers) {
       this.providers = providers.sort((a, b) => a.priority - b.priority);
     } else {
-      // Default providers
+      // Default providers - Polygon first, then fallbacks
       this.providers = [
+        // Primary: Polygon.io (if API key available)
+        ...(process.env.POLYGON_API_KEY 
+          ? [new PolygonProvider(logger, process.env.POLYGON_API_KEY)]
+          : []),
+        // Fallback: Yahoo Finance
         new YahooFinanceProvider(logger),
-        // Only add Alpha Vantage if API key is available
+        // Additional fallback: Alpha Vantage (if API key available)
         ...(process.env.ALPHA_VANTAGE_API_KEY 
           ? [new AlphaVantageProvider(logger, process.env.ALPHA_VANTAGE_API_KEY)]
           : [])

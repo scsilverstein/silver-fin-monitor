@@ -1,6 +1,7 @@
 import React from 'react';
 import { Menu, Bell, User, LogOut, Sun, Moon } from 'lucide-react';
 import { Button } from '@/components/ui';
+import { UTCClock } from '@/components/ui/UTCClock';
 import { useAuthStore, useAppStore } from '@/store';
 import { useNavigate } from 'react-router-dom';
 
@@ -29,7 +30,10 @@ export const Header: React.FC = () => {
         <div className="flex flex-1 items-center justify-between">
           <h1 className="text-xl font-bold">Silver Fin Monitor</h1>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
+            <UTCClock />
+            
+            <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="icon"
@@ -68,6 +72,7 @@ export const Header: React.FC = () => {
                 <LogOut className="h-5 w-5" />
               </Button>
             </div>
+          </div>
           </div>
         </div>
       </div>

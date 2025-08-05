@@ -64,6 +64,7 @@ export const useProcessedContentFilters = (content: ContentItem[] = []) => {
       sentimentRange: [-1, 1],
       dateRange: '7d'
     });
+    updateFilters({ searchQuery: '', sourceId: '' });
   };
 
   // Filter content based on current filters

@@ -11,6 +11,7 @@ import {
 import { RefreshCw, FileText, BarChart3, Calendar, TrendingUp } from 'lucide-react';
 import { useAnalysisData } from '@/hooks/useAnalysisData';
 import { useAnalysisFilters } from '@/hooks/useAnalysisFilters';
+import { useQueueTrigger, QueueTriggerType } from '@/hooks/useQueueTrigger';
 import { AnalysisHeader } from '@/components/analysis/AnalysisHeader';
 import { AnalysisStats } from '@/components/analysis/AnalysisStats';
 import { AnalysisCard } from '@/components/analysis/AnalysisCard';
@@ -38,6 +39,13 @@ export const ModernAnalysis: React.FC = () => {
     loadPreviousPage,
     generateAnalysis
   } = useAnalysisData();
+
+  // Trigger queue job when page loads
+  const { triggerManually: triggerAnalysisRefresh } = useQueueTrigger({
+    type: QueueTriggerType.ANALYSIS_REFRESH,
+    cooldownMinutes: 60, // Daily analysis, so longer cooldown
+    enabled: true
+  });
   
   const {
     filters,
@@ -145,7 +153,10 @@ export const ModernAnalysis: React.FC = () => {
         searchQuery={searchQuery}
         searchPlaceholder="Search analyses..."
         onSearchChange={setSearchQuery}
-        onRefresh={() => refreshAnalyses()}
+        onRefresh={async () => {
+          await refreshAnalyses();
+          await triggerAnalysisRefresh();
+        }}
         refreshing={refreshing}
         primaryActions={[
           {

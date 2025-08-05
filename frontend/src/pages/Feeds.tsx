@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { feedsApi } from '@/lib/api';
+import { feedsApi, queueApi } from '@/lib/api';
 import {
   ModernCard,
   CardContent,
@@ -11,18 +11,78 @@ import {
   ModernInput,
   LegacySelect as Select
 } from '@/components/ui';
-import { Plus, Play, Pause, Trash2, Edit, Rss } from 'lucide-react';
+import { Plus, Play, Pause, Trash2, Edit, Rss, RefreshCw } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 
 export const Feeds: React.FC = () => {
   const queryClient = useQueryClient();
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingFeed, setEditingFeed] = useState<string | null>(null);
+  const [lastAutoRefresh, setLastAutoRefresh] = useState<Date | null>(null);
+  const [isProcessingFeeds, setIsProcessingFeeds] = useState(false);
 
-  const { data: feeds, isLoading } = useQuery({
+  const { data: feeds, isLoading, refetch } = useQuery({
     queryKey: ['feeds'],
-    queryFn: feedsApi.list
+    queryFn: feedsApi.list,
+    // Trigger automatic feed processing when data is loaded
+    onSuccess: () => {
+      // Auto-refresh feeds every 5 minutes when on this page
+      const now = new Date();
+      if (!lastAutoRefresh || (now.getTime() - lastAutoRefresh.getTime()) > 5 * 60 * 1000) {
+        setLastAutoRefresh(now);
+        triggerFeedProcessing();
+      }
+    }
   });
+
+  // Get queue status to show active processing
+  const { data: queueStats } = useQuery({
+    queryKey: ['queue-stats'],
+    queryFn: queueApi.getStats,
+    refetchInterval: 5000, // Refresh every 5 seconds
+    enabled: true
+  });
+
+  // Auto-refresh every 30 seconds to show updated processing status
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ['feeds'] });
+    }, 30 * 1000);
+
+    return () => clearInterval(interval);
+  }, [queryClient]);
+
+  // Trigger background feed processing
+  const triggerFeedProcessing = async () => {
+    try {
+      // Trigger background processing via the manual trigger endpoint
+      await fetch('/.netlify/functions/trigger-feed-processing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }).catch(() => {
+        // Silently fail - this is background processing
+      });
+    } catch (error) {
+      // Silently fail - this is background processing
+    }
+  };
+
+  // Manual refresh with feed processing
+  const handleRefreshFeeds = async () => {
+    setIsProcessingFeeds(true);
+    try {
+      await triggerFeedProcessing();
+      // Refetch data after triggering processing
+      setTimeout(() => {
+        refetch();
+      }, 2000);
+    } finally {
+      // Stop showing processing indicator after 10 seconds
+      setTimeout(() => {
+        setIsProcessingFeeds(false);
+      }, 10000);
+    }
+  };
 
   const createMutation = useMutation({
     mutationFn: feedsApi.create,
@@ -66,6 +126,11 @@ export const Feeds: React.FC = () => {
     return colors[type] || 'bg-gray-100 text-gray-800';
   };
 
+  // Check if there are active feed processing jobs
+  const activeFeedJobs = queueStats?.currentQueue?.processing || 0;
+  const pendingFeedJobs = queueStats?.currentQueue?.pending || 0;
+  const hasActiveJobs = activeFeedJobs > 0 || pendingFeedJobs > 0;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -73,13 +138,49 @@ export const Feeds: React.FC = () => {
           <h1 className="text-3xl font-bold tracking-tight">Feed Sources</h1>
           <p className="text-muted-foreground">
             Manage your market intelligence sources
+            {(isProcessingFeeds || hasActiveJobs) && (
+              <span className="ml-2 inline-flex items-center text-blue-600">
+                <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
+                {isProcessingFeeds ? 'Processing feeds...' : 
+                 `${activeFeedJobs + pendingFeedJobs} jobs ${activeFeedJobs > 0 ? 'active' : 'queued'}`}
+              </span>
+            )}
           </p>
         </div>
-        <ModernButton onClick={() => setShowAddForm(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Feed
-        </ModernButton>
+        <div className="flex gap-2">
+          <ModernButton
+            variant="outline"
+            onClick={handleRefreshFeeds}
+            disabled={isProcessingFeeds}
+            title="Refresh all feeds and trigger processing"
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${isProcessingFeeds ? 'animate-spin' : ''}`} />
+            {isProcessingFeeds ? 'Processing...' : 'Refresh & Process'}
+          </ModernButton>
+          <ModernButton onClick={() => setShowAddForm(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Feed
+          </ModernButton>
+        </div>
       </div>
+
+      {hasActiveJobs && (
+        <ModernCard className="border-blue-200 bg-blue-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 text-blue-600 animate-spin" />
+                <span className="text-sm font-medium text-blue-900">
+                  Queue Status: {activeFeedJobs} processing, {pendingFeedJobs} pending
+                </span>
+              </div>
+              <div className="text-xs text-blue-700">
+                Jobs are automatically processed in the background
+              </div>
+            </div>
+          </CardContent>
+        </ModernCard>
+      )}
 
       {showAddForm && (
         <ModernCard>

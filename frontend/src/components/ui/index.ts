@@ -14,6 +14,7 @@ export * from './ModernBadge';
 export * from './ModernSkeleton';
 export * from './ModernSelect';
 export * from './TranscriptionModal';
+export * from './UTCClock';
 
 // Re-export legacy components with different names if needed
 export { Button } from './Button';

@@ -80,125 +80,85 @@ export class QueueService {
 
   // Check for duplicate jobs based on job type and payload
   private async checkDuplicateJob(jobType: string, payload: any): Promise<string | null> {
-    // Define deduplication rules for different job types
-    let query = '';
-    let params: any[] = [];
+    // Use Supabase client directly to avoid SQL parser issues with JSON operators
+    const client = this.db.getClient();
+    
+    try {
+      let query = client
+        .from('job_queue')
+        .select('id')
+        .eq('job_type', jobType)
+        .in('status', ['pending', 'processing', 'retry'])
+        .limit(1);
 
-    switch (jobType) {
-      case JobType.FEED_FETCH:
-        // For feed fetch, check if there's already a pending/processing job for the same source
-        query = `
-          SELECT id 
-          FROM job_queue 
-          WHERE job_type = $1 
-          AND status IN ('pending', 'processing', 'retry')
-          AND payload->>'sourceId' = $2
-          LIMIT 1
-        `;
-        params = [jobType, payload.sourceId];
-        break;
+      switch (jobType) {
+        case JobType.FEED_FETCH:
+          // For feed fetch, check if there's already a pending/processing job for the same source
+          if (!payload.sourceId) return null;
+          query = query.eq('payload->>sourceId', payload.sourceId);
+          break;
 
-      case JobType.CONTENT_PROCESS:
-        // For content processing, check if there's already a job for the same raw feed item
-        // Handle different payload structures (contentId, rawFeedId, or sourceId+externalId)
-        if (payload.contentId) {
-          query = `
-            SELECT id 
-            FROM job_queue 
-            WHERE job_type = $1 
-            AND status IN ('pending', 'processing', 'retry')
-            AND payload->>'contentId' = $2
-            LIMIT 1
-          `;
-          params = [jobType, payload.contentId];
-        } else if (payload.rawFeedId) {
-          query = `
-            SELECT id 
-            FROM job_queue 
-            WHERE job_type = $1 
-            AND status IN ('pending', 'processing', 'retry')
-            AND payload->>'rawFeedId' = $2
-            LIMIT 1
-          `;
-          params = [jobType, payload.rawFeedId];
-        } else if (payload.sourceId && payload.externalId) {
-          query = `
-            SELECT id 
-            FROM job_queue 
-            WHERE job_type = $1 
-            AND status IN ('pending', 'processing', 'retry')
-            AND payload->>'sourceId' = $2
-            AND payload->>'externalId' = $3
-            LIMIT 1
-          `;
-          params = [jobType, payload.sourceId, payload.externalId];
-        } else {
-          // No identifiable unique key, allow the job
+        case JobType.CONTENT_PROCESS:
+          // For content processing, check if there's already a job for the same raw feed item
+          // Handle different payload structures (contentId, rawFeedId, or sourceId+externalId)
+          if (payload.contentId) {
+            query = query.eq('payload->>contentId', payload.contentId);
+          } else if (payload.rawFeedId) {
+            query = query.eq('payload->>rawFeedId', payload.rawFeedId);
+          } else if (payload.sourceId && payload.externalId) {
+            query = query
+              .eq('payload->>sourceId', payload.sourceId)
+              .eq('payload->>externalId', payload.externalId);
+          } else {
+            // No identifiable unique key, allow the job
+            return null;
+          }
+          break;
+
+        case JobType.DAILY_ANALYSIS:
+          // For daily analysis, check if there's already a job for the same date
+          if (!payload.date) return null;
+          query = query.eq('payload->>date', payload.date);
+          break;
+
+        case JobType.GENERATE_PREDICTIONS:
+          // For prediction generation, check if there's already a job for the same analysis date
+          const analysisDateKey = payload.analysisDate || payload.date;
+          if (analysisDateKey) {
+            // Handle both analysisDate and date fields
+            query = query.or(`payload->>analysisDate.eq.${analysisDateKey},payload->>date.eq.${analysisDateKey}`);
+          } else if (payload.analysisId) {
+            query = query.eq('payload->>analysisId', payload.analysisId);
+          } else {
+            return null;
+          }
+          break;
+
+        case JobType.PREDICTION_COMPARE:
+          // For prediction comparison, check if there's already a job for the same prediction
+          if (!payload.predictionId) return null;
+          query = query.eq('payload->>predictionId', payload.predictionId);
+          break;
+
+        default:
+          // For other job types, allow duplicates
           return null;
-        }
-        break;
+      }
 
-      case JobType.DAILY_ANALYSIS:
-        // For daily analysis, check if there's already a job for the same date
-        query = `
-          SELECT id 
-          FROM job_queue 
-          WHERE job_type = $1 
-          AND status IN ('pending', 'processing', 'retry')
-          AND payload->>'date' = $2
-          LIMIT 1
-        `;
-        params = [jobType, payload.date];
-        break;
-
-      case JobType.GENERATE_PREDICTIONS:
-        // For prediction generation, check if there's already a job for the same analysis date
-        const analysisDateKey = payload.analysisDate || payload.date;
-        if (analysisDateKey) {
-          query = `
-            SELECT id 
-            FROM job_queue 
-            WHERE job_type = $1 
-            AND status IN ('pending', 'processing', 'retry')
-            AND (payload->>'analysisDate' = $2 OR payload->>'date' = $2)
-            LIMIT 1
-          `;
-          params = [jobType, analysisDateKey];
-        } else if (payload.analysisId) {
-          query = `
-            SELECT id 
-            FROM job_queue 
-            WHERE job_type = $1 
-            AND status IN ('pending', 'processing', 'retry')
-            AND payload->>'analysisId' = $2
-            LIMIT 1
-          `;
-          params = [jobType, payload.analysisId];
-        } else {
-          return null;
-        }
-        break;
-
-      case JobType.PREDICTION_COMPARE:
-        // For prediction comparison, check if there's already a job for the same prediction
-        query = `
-          SELECT id 
-          FROM job_queue 
-          WHERE job_type = $1 
-          AND status IN ('pending', 'processing', 'retry')
-          AND payload->>'predictionId' = $2
-          LIMIT 1
-        `;
-        params = [jobType, payload.predictionId];
-        break;
-
-      default:
-        // For other job types, allow duplicates
+      const { data, error } = await query;
+      
+      if (error) {
+        this.logger.error('Deduplication query error:', error);
+        // If deduplication fails, allow the job to be created
         return null;
-    }
+      }
 
-    const result = await this.db.query<{ id: string }>(query, params);
-    return result.length > 0 ? result[0].id : null;
+      return data && data.length > 0 ? data[0].id : null;
+    } catch (error) {
+      this.logger.error('Deduplication check failed:', error);
+      // If deduplication fails, allow the job to be created
+      return null;
+    }
   }
 
   // Bulk enqueue jobs with deduplication

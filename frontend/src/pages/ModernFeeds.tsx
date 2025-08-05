@@ -30,7 +30,8 @@ import { WhisperServiceStatus } from '@/components/whisper/WhisperServiceStatus'
 import { useFeedsData } from '@/hooks/useFeedsData';
 import { useFeedActions } from '@/hooks/useFeedActions';
 import { useFeedItems } from '@/hooks/useFeedItems';
-import { contentApi } from '@/lib/api';
+import { useQueueTrigger, QueueTriggerType } from '@/hooks/useQueueTrigger';
+import { contentApi, queueApi } from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import { filterByDuration } from '@/utils/dateFilters';
 import { FeedListSkeleton } from '@/components/feeds/FeedSkeleton';
@@ -71,6 +72,14 @@ export const ModernFeeds: React.FC = () => {
   } = useFeedActions(feeds, setFeeds, refreshAll);
 
   const { feedItems, loadingItems, loadFeedItems, updateFeedItemStatus } = useFeedItems();
+
+  // Trigger queue job when page loads
+  const { triggerManually: triggerFeedRefresh } = useQueueTrigger({
+    type: QueueTriggerType.FEED_REFRESH,
+    cooldownMinutes: 30,
+    enabled: true
+  });
+  
 
   // Auto-reload expanded feed items
   useEffect(() => {
@@ -266,6 +275,7 @@ export const ModernFeeds: React.FC = () => {
 
   return (
     <PageContainer showBreadcrumbs>
+      
       <PageHeader
         title="Feed Sources"
         subtitle="Manage your content feed sources and processing"
@@ -294,7 +304,10 @@ export const ModernFeeds: React.FC = () => {
         searchQuery={searchQuery}
         searchPlaceholder="Search feeds..."
         onSearchChange={setSearchQuery}
-        onRefresh={refreshAll}
+        onRefresh={async () => {
+          await refreshAll();
+          await triggerFeedRefresh();
+        }}
         refreshing={refreshing}
         primaryActions={[
           {
@@ -336,7 +349,10 @@ export const ModernFeeds: React.FC = () => {
           ) : (
             <NoContentEmptyState 
               onAddFeed={handleAddFeed}
-              onRefresh={refreshAll}
+              onRefresh={async () => {
+                await refreshAll();
+                await triggerFeedRefresh();
+              }}
             />
           )
         ) : (

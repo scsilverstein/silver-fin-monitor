@@ -268,7 +268,7 @@ export const EntityMentionSources: React.FC<EntityMentionSourcesProps> = ({
                     
                     {sourceData.mentions.length > 3 && (
                       <div className="text-center pt-2">
-                        <Button variant="link" size="sm" className="text-xs">
+                        <Button variant="outline" size="sm" className="text-xs">
                           View all {sourceData.mentions.length} mentions from {sourceName}
                         </Button>
                       </div>

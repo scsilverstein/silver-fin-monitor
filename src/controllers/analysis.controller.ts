@@ -532,15 +532,19 @@ export class AnalysisController {
         });
       }
       
-      // Generate predictions immediately (for demo purposes)
-      // In production, this should be queued
-      const predictions = await aiAnalysisService.generatePredictions(analysis as any);
+      // Queue prediction generation - QUEUE-BASED PROCESSING ONLY
+      const jobId = await queueService.enqueue('generate_predictions', {
+        analysisDate: (analysis as any).analysis_date,
+        analysisId: analysisId,
+        source: 'manual_request'
+      }, 1); // High priority
       
       res.json({
         success: true,
         data: {
-          predictions,
-          message: 'Predictions generated successfully'
+          jobId,
+          message: 'Prediction generation queued successfully',
+          analysisId
         }
       });
     } catch (error) {

@@ -3,6 +3,7 @@ import { PageContainer, PageHeader, LoadingState, EmptyState, StatsGrid, createP
 import { Download, TrendingUp } from 'lucide-react';
 import { usePredictionsData } from '@/hooks/usePredictionsData';
 import { usePredictionsFilters } from '@/hooks/usePredictionsFilters';
+import { useQueueTrigger, QueueTriggerType } from '@/hooks/useQueueTrigger';
 import { exportPredictions } from '@/utils/predictionHelpers';
 import { PredictionsFilters } from '@/components/predictions/PredictionsFilters';
 import { PredictionsTabs } from '@/components/predictions/PredictionsTabs';
@@ -18,6 +19,13 @@ const Predictions: React.FC = () => {
     loadPredictions, 
     generatePredictions 
   } = usePredictionsData();
+
+  // Trigger queue job when page loads
+  const { triggerManually: triggerPredictionRefresh } = useQueueTrigger({
+    type: QueueTriggerType.PREDICTION_REFRESH,
+    cooldownMinutes: 60, // Daily predictions, so longer cooldown
+    enabled: true
+  });
 
   const {
     selectedHorizon,
@@ -57,7 +65,10 @@ const Predictions: React.FC = () => {
           { label: 'Live', variant: 'info', dot: true },
           { label: `${predictions.length} Total`, variant: 'outline' }
         ]}
-        onRefresh={loadPredictions}
+        onRefresh={async () => {
+          await loadPredictions();
+          await triggerPredictionRefresh();
+        }}
         refreshing={loading}
         primaryActions={[
           {

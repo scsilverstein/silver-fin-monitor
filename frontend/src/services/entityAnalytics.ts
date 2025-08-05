@@ -1,5 +1,5 @@
 // Entity Analytics Service - handles trending calculations and sentiment analysis
-import { api } from '../lib/api';
+import { entityAnalyticsApi } from '../lib/api';
 import {
   EntityAnalytics,
   EntityTrend,
@@ -17,81 +17,35 @@ import {
 } from '../types/entityAnalytics';
 
 class EntityAnalyticsService {
-  private baseUrl = '/entity-analytics'; // Note: This gets prefixed with /api/v1 by axios instance
-
   // Get entity analytics dashboard
   async getDashboardData(timeRange?: { start: Date; end: Date }): Promise<EntityDashboardData> {
-    const params = new URLSearchParams();
-    if (timeRange) {
-      params.append('start', timeRange.start.toISOString());
-      params.append('end', timeRange.end.toISOString());
-    }
-    
-    const response = await api.get(`${this.baseUrl}/dashboard?${params}`);
+    const backendData = await entityAnalyticsApi.getDashboardData();
     
     // Transform backend data to match frontend interface
-    const backendData = response.data.data;
     
     return {
-      topTrending: backendData.topEntities?.map((entity: any) => ({
+      topTrending: backendData.topTrending?.map((entity: any) => ({
         entityName: entity.entityName,
         entityType: entity.entityType,
-        totalMentions: entity.mentionCount,
+        totalMentions: entity.totalMentions,
         firstMentioned: new Date(),
         lastMentioned: new Date(),
-        overallSentiment: entity.sentiment,
+        overallSentiment: entity.overallSentiment,
         sentimentTrend: 'stable' as const,
-        trendingScore: entity.trendScore || 0,
+        trendingScore: entity.trendingScore || 0,
         weeklyChange: 0,
         monthlyChange: 0,
         topSources: [],
         historicalMentions: [],
         relatedEntities: []
       })) || [],
-      sentimentLeaders: backendData.topEntities?.filter((e: any) => e.sentiment > 0.2) || [],
-      sentimentLaggers: backendData.topEntities?.filter((e: any) => e.sentiment < -0.2) || [],
-      newEntities: [],
-      insights: [],
-      totalEntitiesTracked: backendData.topEntities?.length || 0,
-      totalMentionsToday: backendData.topEntities?.reduce((sum: number, e: any) => sum + e.mentionCount, 0) || 0,
-      averageSentimentToday: backendData.topEntities?.length > 0 
-        ? backendData.topEntities.reduce((sum: number, e: any) => sum + e.sentiment, 0) / backendData.topEntities.length
-        : 0
-    };
-  }
-
-  // Get detailed analytics for a specific entity
-  async getEntityAnalytics(entityName: string, entityType?: string): Promise<EntityAnalytics> {
-    try {
-      const params = new URLSearchParams();
-      if (entityType) {
-        params.append('type', entityType);
-      }
-      
-      const response = await api.get(`${this.baseUrl}/entity/${encodeURIComponent(entityName)}?${params}`);
-      return response.data.data;
-    } catch (error) {
-      // Fallback: create basic entity analytics from dashboard data
-      const dashboardData = await this.getDashboardData();
-      const entityFromDashboard = dashboardData.topTrending.find(e => e.entityName === entityName);
-      
-      if (entityFromDashboard) {
-        return {
-          ...entityFromDashboard,
-          historicalMentions: [
-            { date: new Date().toISOString(), sentiment: entityFromDashboard.overallSentiment, mentionCount: entityFromDashboard.totalMentions }
-          ]
-        };
-      }
-      
-      // If entity not found, return default structure
-      return {
-        entityName,
-        entityType: entityType || 'unknown',
-        totalMentions: 0,
+      sentimentLeaders: backendData.sentimentLeaders?.map((entity: any) => ({
+        entityName: entity.entityName,
+        entityType: entity.entityType,
+        totalMentions: entity.totalMentions,
         firstMentioned: new Date(),
         lastMentioned: new Date(),
-        overallSentiment: 0,
+        overallSentiment: entity.overallSentiment,
         sentimentTrend: 'stable' as const,
         trendingScore: 0,
         weeklyChange: 0,
@@ -99,8 +53,36 @@ class EntityAnalyticsService {
         topSources: [],
         historicalMentions: [],
         relatedEntities: []
-      };
-    }
+      })) || [],
+      sentimentLaggers: backendData.topTrending?.filter((e: any) => e.overallSentiment < -0.2) || [],
+      newEntities: [],
+      insights: [],
+      totalEntitiesTracked: backendData.totalEntitiesTracked || 0,
+      totalMentionsToday: backendData.totalMentionsToday || 0,
+      averageSentimentToday: backendData.averageSentimentToday || 0
+    };
+  }
+
+  // Get detailed analytics for a specific entity
+  async getEntityAnalytics(entityName: string, entityType?: string): Promise<EntityAnalytics> {
+    const backendData = await entityAnalyticsApi.getEntityAnalytics(entityName);
+    
+    // Transform to match frontend interface
+    return {
+      entityName: backendData.entityName,
+      entityType: backendData.entityType,
+      totalMentions: backendData.totalMentions,
+      firstMentioned: new Date(),
+      lastMentioned: new Date(),
+      overallSentiment: backendData.overallSentiment,
+      sentimentTrend: 'stable' as const,
+      trendingScore: backendData.trendingScore,
+      weeklyChange: 0,
+      monthlyChange: 0,
+      topSources: [],
+      historicalMentions: backendData.historicalMentions || [],
+      relatedEntities: []
+    };
   }
 
   // Get trending entities with filters
@@ -136,8 +118,9 @@ class EntityAnalyticsService {
       }
     }
     
-    const response = await api.get<EntityTrendsResponse>(`${this.baseUrl}/trending?${params}`);
-    return response.data.data;
+    // For now, return empty array since trending is not implemented in mock
+    // const response = await api.get<EntityTrendsResponse>(`${this.baseUrl}/trending?${params}`);
+    return [];
   }
 
   // Compare multiple entities
@@ -155,8 +138,13 @@ class EntityAnalyticsService {
       metric
     };
     
-    const response = await api.post<EntityComparisonResponse>(`${this.baseUrl}/compare`, payload);
-    return response.data.data;
+    // For now, return empty comparison since not implemented in mock
+    return {
+      entities,
+      timeRange,
+      metric,
+      data: []
+    };
   }
 
   // Get entity mentions with context
@@ -165,48 +153,34 @@ class EntityAnalyticsService {
     limit: number = 10000,
     offset: number = 0
   ): Promise<{ mentions: EntityMention[]; total: number }> {
-    const params = new URLSearchParams({
-      limit: limit.toString(),
-      offset: offset.toString()
-    });
+    const response = await entityAnalyticsApi.getEntityMentions(entityName, limit, offset);
     
-    const response = await api.get(`${this.baseUrl}/entity/${encodeURIComponent(entityName)}/mentions?${params}`);
+    // Map backend response to match EntityMention interface
+    const mappedMentions = (response.mentions || []).map((mention: any) => ({
+      id: mention.id,
+      entityName: entityName,
+      entityType: 'topic', // This would need to be passed or fetched separately
+      mentionDate: new Date(mention.mentionDate),
+      sourceId: mention.source?.id || '',
+      sourceName: mention.source?.name || mention.sourceName || 'Unknown Source', 
+      sourceType: mention.source?.type || mention.sourceType || 'unknown',
+      sentimentScore: mention.sentiment || mention.sentimentScore || 0,
+      confidence: mention.confidence || 0.5,
+      contextSnippet: mention.contentSummary || mention.contextSnippet || '',
+      contentId: mention.contentId || mention.id,
+      contentTitle: mention.title || mention.contentTitle || 'Untitled'
+    }));
     
-    // The backend returns { success: true, data: { mentions: [...], total: N } }
-    if (response.data?.data) {
-      // Map backend response to match EntityMention interface
-      const mappedMentions = (response.data.data.mentions || []).map((mention: any) => ({
-        id: mention.id,
-        entityName: entityName,
-        entityType: 'topic', // This would need to be passed or fetched separately
-        mentionDate: new Date(mention.mentionDate),
-        sourceId: mention.source?.id || '',
-        sourceName: mention.source?.name || mention.sourceName || 'Unknown Source',
-        sourceType: mention.source?.type || mention.sourceType || 'unknown',
-        sentimentScore: mention.sentiment || mention.sentimentScore || 0,
-        confidence: mention.confidence || 0.5,
-        contextSnippet: mention.contentSummary || mention.contextSnippet || '',
-        contentId: mention.contentId || mention.id,
-        contentTitle: mention.title || mention.contentTitle || 'Untitled'
-      }));
-      
-      return {
-        mentions: mappedMentions,
-        total: response.data.data.total || 0
-      };
-    }
-    
-    return response.data || { mentions: [], total: 0 };
+    return {
+      mentions: mappedMentions,
+      total: response.total || 0
+    };
   }
 
   // Get entity insights (AI-generated observations)
   async getEntityInsights(entityName?: string): Promise<EntityInsight[]> {
-    const url = entityName 
-      ? `${this.baseUrl}/insights/${encodeURIComponent(entityName)}`
-      : `${this.baseUrl}/insights`;
-    
-    const response = await api.get(url);
-    return response.data || [];
+    // For now, return empty insights since not implemented in mock
+    return [];
   }
 
   // Search entities
@@ -216,27 +190,7 @@ class EntityAnalyticsService {
     mentionCount: number;
     recentSentiment: number;
   }>> {
-    try {
-      const params = new URLSearchParams({
-        q: query,
-        limit: limit.toString()
-      });
-      
-      const response = await api.get(`${this.baseUrl}/search?${params}`);
-      return response.data || [];
-    } catch (error) {
-      // Fallback: search through dashboard data
-      const dashboardData = await this.getDashboardData();
-      return dashboardData.topTrending
-        .filter(entity => entity.entityName.toLowerCase().includes(query.toLowerCase()))
-        .slice(0, limit)
-        .map(entity => ({
-          entityName: entity.entityName,
-          entityType: entity.entityType,
-          mentionCount: entity.totalMentions,
-          recentSentiment: entity.overallSentiment
-        }));
-    }
+    return await entityAnalyticsApi.searchEntities(query, limit);
   }
 
   // Client-side utility functions

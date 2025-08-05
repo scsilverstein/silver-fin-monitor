@@ -149,6 +149,163 @@ export class QueueWorker {
       }
     },
     
+    // New handlers for page-triggered tasks
+    feed_fetch_all: async (payload) => {
+      const { triggeredBy, timestamp } = payload;
+      logger.info('Processing feed_fetch_all', { triggeredBy, timestamp });
+      
+      try {
+        // Get all active feeds
+        const { data: activeFeeds, error } = await db.getClient()
+          .from('feed_sources')
+          .select('*')
+          .eq('is_active', true);
+          
+        if (error) throw error;
+        
+        logger.info(`Found ${activeFeeds?.length || 0} active feeds to check`);
+        
+        // Check each feed to see if it needs refreshing
+        for (const feed of activeFeeds || []) {
+          const lastProcessed = feed.last_processed_at ? new Date(feed.last_processed_at) : null;
+          const updateFrequency = feed.config?.update_frequency || 'hourly';
+          const now = new Date();
+          
+          // Calculate if feed needs update
+          const shouldUpdate = !lastProcessed || (() => {
+            const diffMinutes = (now.getTime() - lastProcessed.getTime()) / (1000 * 60);
+            switch (updateFrequency) {
+              case '15min': return diffMinutes >= 15;
+              case '30min': return diffMinutes >= 30;
+              case 'hourly': return diffMinutes >= 60;
+              case '4hours': return diffMinutes >= 240;
+              case 'daily': return diffMinutes >= 1440;
+              case 'weekly': return diffMinutes >= 10080;
+              default: return diffMinutes >= 60;
+            }
+          })();
+          
+          if (shouldUpdate) {
+            await queueService.enqueue('feed_fetch', {
+              sourceId: feed.id
+            }, {
+              priority: feed.config?.priority === 'high' ? 1 : 
+                       feed.config?.priority === 'medium' ? 3 : 5
+            });
+            logger.info(`Queued feed ${feed.name} for processing`);
+          }
+        }
+      } catch (error) {
+        logger.error('Error in feed_fetch_all:', error);
+        throw error;
+      }
+    },
+    
+    content_process_check: async (payload) => {
+      const { triggeredBy, timestamp } = payload;
+      logger.info('Processing content_process_check', { triggeredBy, timestamp });
+      
+      try {
+        // Find unprocessed content
+        const { data: unprocessedContent, error: contentError } = await db.getClient()
+          .from('processed_content')
+          .select('id')
+          .or('entities.is.null,entities.eq.{}')
+          .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+          .limit(50);
+          
+        if (contentError) throw contentError;
+        
+        logger.info(`Found ${unprocessedContent?.length || 0} unprocessed content items`);
+        
+        // Queue them for processing
+        for (const content of unprocessedContent || []) {
+          await queueService.enqueue('content_process', {
+            contentId: content.id
+          }, { priority: 5 });
+        }
+        
+        // Also check for raw feeds that haven't been processed
+        const { data: unprocessedFeeds, error: feedError } = await db.getClient()
+          .from('raw_feeds')
+          .select('id, source_id, external_id')
+          .eq('processing_status', 'pending')
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .limit(50);
+          
+        if (feedError) throw feedError;
+        
+        logger.info(`Found ${unprocessedFeeds?.length || 0} unprocessed raw feeds`);
+        
+        // Queue them for content processing
+        for (const feed of unprocessedFeeds || []) {
+          await queueService.enqueue('content_process', {
+            rawFeedId: feed.id,
+            sourceId: feed.source_id,
+            externalId: feed.external_id
+          }, { priority: 4 });
+        }
+      } catch (error) {
+        logger.error('Error in content_process_check:', error);
+        throw error;
+      }
+    },
+    
+    prediction_check: async (payload) => {
+      const { triggeredBy, timestamp } = payload;
+      logger.info('Processing prediction_check', { triggeredBy, timestamp });
+      
+      try {
+        // Check if we need to generate predictions for today
+        const today = new Date().toISOString().split('T')[0];
+        const { data: todayAnalysis } = await db.getClient()
+          .from('daily_analysis')
+          .select('*')
+          .eq('analysis_date', today)
+          .single();
+          
+        if (todayAnalysis) {
+          // Check if predictions exist
+          const { data: predictions, error } = await db.getClient()
+            .from('predictions')
+            .select('id')
+            .eq('daily_analysis_id', todayAnalysis.id);
+            
+          if (!error && (!predictions || predictions.length === 0)) {
+            logger.info('No predictions for today, generating...');
+            await queueService.enqueue('generate_predictions', {
+              analysisId: todayAnalysis.id,
+              analysisDate: today
+            }, { priority: 2 });
+          }
+        }
+        
+        // Check for due prediction comparisons
+        const { data: duePredictions } = await db.getClient()
+          .from('predictions')
+          .select('*')
+          .is('prediction_comparisons.id', null)
+          .or(
+            `time_horizon.eq.1_week,created_at.lte.${new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()}`,
+            `time_horizon.eq.1_month,created_at.lte.${new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()}`,
+            `time_horizon.eq.3_months,created_at.lte.${new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()}`
+          )
+          .limit(20);
+          
+        logger.info(`Found ${duePredictions?.length || 0} predictions due for comparison`);
+        
+        for (const prediction of duePredictions || []) {
+          await queueService.enqueue('prediction_compare', {
+            predictionId: prediction.id,
+            analysisDate: today
+          }, { priority: 3 });
+        }
+      } catch (error) {
+        logger.error('Error in prediction_check:', error);
+        throw error;
+      }
+    },
+    
     transcribe_audio: async (payload) => {
       const { feedId, audioUrl, title } = payload;
       const jobStartTime = Date.now();
@@ -516,22 +673,74 @@ export class QueueWorker {
       }
     });
 
-    // Run analysis every 4 hours (same as feed processing)
+    // Run smarter analysis checks every 4 hours (same as feed processing)
     this.scheduleTask('analysis_generation', 4 * 60 * 60 * 1000, async () => {
-      logger.info('Running 4-hourly analysis and predictions');
-      const currentDate = new Date();
+      logger.info('Running 4-hourly smart analysis check');
+      const today = new Date().toISOString().split('T')[0];
       
-      // Queue analysis with current timestamp to ensure uniqueness
-      await queueService.enqueue(JobType.DAILY_ANALYSIS, { 
-        date: currentDate.toISOString().split('T')[0]
-      }, { priority: 1 });
-      
-      // Also queue prediction generation immediately after
-      setTimeout(async () => {
-        await queueService.enqueue(JobType.GENERATE_PREDICTIONS, { 
-          analysisDate: currentDate.toISOString().split('T')[0]
-        }, { priority: 1 });
-      }, 30000); // Wait 30 seconds to let analysis complete
+      // Check if analysis exists and how old it is
+      const { data: existingAnalysis } = await supabase
+        .from('daily_analysis')
+        .select('id, created_at')
+        .eq('analysis_date', today)
+        .single();
+
+      // Count processed content today
+      const startOfDay = new Date();
+      startOfDay.setUTCHours(0, 0, 0, 0);
+      const { data: todayContent } = await supabase
+        .from('processed_content')
+        .select('id')
+        .gte('created_at', startOfDay.toISOString());
+
+      const contentCount = todayContent?.length || 0;
+      const hasOldAnalysis = existingAnalysis && 
+        new Date(existingAnalysis.created_at).getTime() < Date.now() - 6 * 60 * 60 * 1000;
+
+      logger.info('4-hourly analysis check', { 
+        today, 
+        contentCount, 
+        hasExistingAnalysis: !!existingAnalysis,
+        hasOldAnalysis 
+      });
+
+      // Only queue if we have enough content and either no analysis or old analysis
+      if (contentCount >= 5 && (!existingAnalysis || hasOldAnalysis)) {
+        // Check if already queued to avoid duplicates
+        const { data: existingJobs } = await supabase
+          .from('job_queue')
+          .select('id')
+          .eq('job_type', 'daily_analysis')
+          .in('status', ['pending', 'processing', 'retry'])
+          .contains('payload', { date: today });
+
+        if (!existingJobs || existingJobs.length === 0) {
+          await queueService.enqueue('daily_analysis', { 
+            date: today,
+            forceRegenerate: !!existingAnalysis,
+            source: '4hourly_periodic_check',
+            contentCount
+          }, 1); // High priority
+          
+          logger.info('🧠 Queued analysis from 4-hourly check', { today, contentCount });
+
+          // Queue prediction generation with proper delay
+          await queueService.enqueue('generate_predictions', { 
+            analysisDate: today,
+            source: '4hourly_periodic_check'
+          }, 2, 300); // Medium priority, 5 minute delay
+          
+          logger.info('🔮 Queued predictions from 4-hourly check', { today });
+        } else {
+          logger.info('Analysis already queued, skipping 4-hourly trigger', { today });
+        }
+      } else {
+        logger.info('4-hourly check: conditions not met for analysis trigger', { 
+          contentCount, 
+          hasExistingAnalysis: !!existingAnalysis,
+          hasOldAnalysis 
+        });
+      }
     });
 
     // Clean up old data daily at 2 AM UTC

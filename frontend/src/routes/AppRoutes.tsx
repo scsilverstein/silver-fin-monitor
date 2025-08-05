@@ -26,6 +26,7 @@ import { AnalysisList } from '@/pages/AnalysisList';
 import { StockScannerPage } from '@/pages/StockScannerPage';
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import QueueTest from '@/pages/QueueTest';
+import QueueDebug from '@/pages/QueueDebug';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -228,6 +229,17 @@ export const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <ModernLayout>
               <QueueTest />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
+        path="/queue-debug"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <QueueDebug />
             </ModernLayout>
           </ProtectedRoute>
         }

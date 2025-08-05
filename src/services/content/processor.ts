@@ -99,6 +99,9 @@ export class ContentProcessor {
         .eq('id', rawFeedId);
 
       logger.info('Content processing completed', { rawFeedId });
+
+      // SMART DEPENDENCY TRIGGER: Check if we should queue analysis/predictions
+      await this.checkAndTriggerDownstreamJobs();
     } catch (error) {
       logger.error('Content processing failed', { rawFeedId, error });
       
@@ -388,6 +391,114 @@ Format your response as JSON:
     return summary.length > 300 
       ? summary.substring(0, 297) + '...'
       : summary;
+  }
+
+  /**
+   * Smart dependency trigger - checks if we should queue analysis/predictions
+   * after content processing completes
+   */
+  private async checkAndTriggerDownstreamJobs(): Promise<void> {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      const currentHour = now.getUTCHours();
+
+      // Check if daily analysis exists for today
+      const { data: existingAnalysis } = await supabase
+        .from('daily_analysis')
+        .select('id, created_at')
+        .eq('analysis_date', today)
+        .single();
+
+      // Count processed content from last 6 hours (significant new content threshold)
+      const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
+      const { data: recentContent, error: countError } = await supabase
+        .from('processed_content')
+        .select('id')
+        .gte('created_at', sixHoursAgo);
+
+      if (countError) {
+        logger.error('Failed to count recent content', { error: countError });
+        return;
+      }
+
+      const recentContentCount = recentContent?.length || 0;
+      logger.info('Dependency check', { 
+        today, 
+        currentHour, 
+        recentContentCount, 
+        hasExistingAnalysis: !!existingAnalysis 
+      });
+
+      // TRIGGER CONDITIONS for daily analysis:
+      const shouldTriggerAnalysis = (
+        // 1. No analysis exists for today AND we have enough content (5+ items)
+        (!existingAnalysis && recentContentCount >= 5) ||
+        
+        // 2. Analysis exists but is old (6+ hours) AND we have new content (3+ items)
+        (existingAnalysis && 
+         new Date(existingAnalysis.created_at).getTime() < Date.now() - 6 * 60 * 60 * 1000 &&
+         recentContentCount >= 3) ||
+         
+        // 3. It's past 6 AM UTC (scheduled time) and no analysis exists
+        (currentHour >= 6 && !existingAnalysis) ||
+        
+        // 4. It's past 2 PM UTC (afternoon update) and analysis is old
+        (currentHour >= 14 && existingAnalysis &&
+         new Date(existingAnalysis.created_at).getTime() < Date.now() - 8 * 60 * 60 * 1000)
+      );
+
+      if (shouldTriggerAnalysis) {
+        // Check if analysis job is already queued to avoid duplicates
+        const { data: existingJobs } = await supabase
+          .from('job_queue')
+          .select('id')
+          .eq('job_type', 'daily_analysis')
+          .in('status', ['pending', 'processing', 'retry'])
+          .contains('payload', { date: today });
+
+        if (!existingJobs || existingJobs.length === 0) {
+          // Queue daily analysis job
+          const { queueService } = await import('../queue/queue.service');
+          const analysisJobId = await queueService.enqueue('daily_analysis', {
+            date: today,
+            forceRegenerate: !!existingAnalysis,
+            source: 'content_dependency_trigger',
+            contentCount: recentContentCount
+          }, 1); // High priority
+
+          logger.info('🧠 Queued daily analysis job from content dependency trigger', {
+            today,
+            analysisJobId,
+            recentContentCount,
+            hasExistingAnalysis: !!existingAnalysis
+          });
+
+          // Also queue prediction generation with delay
+          const predictionJobId = await queueService.enqueue('generate_predictions', {
+            analysisDate: today,
+            source: 'content_dependency_trigger'
+          }, 2, 600); // Medium priority, 10 minute delay
+
+          logger.info('🔮 Queued prediction generation job from content dependency trigger', {
+            today,
+            predictionJobId
+          });
+        } else {
+          logger.info('Daily analysis job already queued, skipping', { today });
+        }
+      } else {
+        logger.debug('Dependency trigger conditions not met', {
+          recentContentCount,
+          hasExistingAnalysis: !!existingAnalysis,
+          currentHour
+        });
+      }
+
+    } catch (error) {
+      logger.error('Failed to check downstream job dependencies', { error });
+      // Don't throw - this is a background operation that shouldn't fail content processing
+    }
   }
 }
 
