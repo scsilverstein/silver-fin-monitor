@@ -123,7 +123,7 @@ export async function processFeed(sourceId: string): Promise<void> {
         await queueService.enqueue(JobType.CONTENT_PROCESS, {
           sourceId: source.id,
           externalId: item.externalId
-        }, { priority: 3 });
+        }, { priority: 2 });
       }
     }
 

@@ -23,6 +23,13 @@ export class SQLParser {
       return { type: 'raw', raw: sql };
     }
     
+    // Handle queue functions specially
+    if (normalizedSql.includes('dequeue_job') || normalizedSql.includes('complete_job') || 
+        normalizedSql.includes('fail_job') || normalizedSql.includes('enqueue_job') ||
+        normalizedSql.includes('cleanup_expired_data')) {
+      return { type: 'raw', raw: sql };
+    }
+    
     // SELECT queries
     if (normalizedSql.startsWith('select')) {
       return this.parseSelect(sql, params);
@@ -187,7 +194,7 @@ export async function executeQuery(client: SupabaseClient, sql: string, params?:
   const parsed = SQLParser.parse(sql, params);
   
   if (parsed.type === 'raw') {
-    // For cache functions and other RPC calls
+    // Handle cache functions
     if (parsed.raw?.includes('cache_get')) {
       const { data, error } = await client.rpc('cache_get', { cache_key: params?.[0] });
       if (error) throw error;
@@ -208,7 +215,42 @@ export async function executeQuery(client: SupabaseClient, sql: string, params?:
       return [];
     }
     
-    // For other raw queries, throw error
+    // Handle queue functions
+    if (parsed.raw?.includes('dequeue_job')) {
+      const { data, error } = await client.rpc('dequeue_job');
+      if (error) throw error;
+      return data || [];
+    }
+    if (parsed.raw?.includes('complete_job')) {
+      const { data, error } = await client.rpc('complete_job', { job_id: params?.[0] });
+      if (error) throw error;
+      return [{ success: data }];
+    }
+    if (parsed.raw?.includes('fail_job')) {
+      const { data, error } = await client.rpc('fail_job', { 
+        job_id: params?.[0], 
+        error_msg: params?.[1] 
+      });
+      if (error) throw error;
+      return [{ success: data }];
+    }
+    if (parsed.raw?.includes('enqueue_job')) {
+      const { data, error } = await client.rpc('enqueue_job', { 
+        job_type: params?.[0],
+        payload: params?.[1],
+        priority: params?.[2],
+        delay_seconds: params?.[3]
+      });
+      if (error) throw error;
+      return [{ job_id: data }];
+    }
+    if (parsed.raw?.includes('cleanup_expired_data')) {
+      const { data, error } = await client.rpc('cleanup_expired_data');
+      if (error) throw error;
+      return [{ cleaned_count: data }];
+    }
+    
+    // For other raw queries, throw error  
     throw new Error(`Unsupported SQL query: ${sql}`);
   }
   

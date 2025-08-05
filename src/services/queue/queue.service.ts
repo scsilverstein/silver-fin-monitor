@@ -257,26 +257,58 @@ export class QueueService {
     this.logger.info('Queue processing stopped');
   }
 
+  // Dequeue a job for processing (public method for QueueWorker)
+  async dequeue(): Promise<QueueJob | null> {
+    try {
+      const jobs = await this.db.query<QueueJob>('SELECT * FROM dequeue_job()');
+      return jobs.length > 0 ? jobs[0] : null;
+    } catch (error) {
+      this.logger.error('Failed to dequeue job:', error);
+      throw error;
+    }
+  }
+
+  // Complete a job (public method for QueueWorker)
+  async complete(jobId: string): Promise<void> {
+    try {
+      await this.db.query('SELECT complete_job($1)', [jobId]);
+      this.logger.info(`Job completed: ${jobId}`);
+    } catch (error) {
+      this.logger.error(`Failed to complete job ${jobId}:`, error);
+      throw error;
+    }
+  }
+
+  // Fail a job (public method for QueueWorker)
+  async fail(jobId: string, errorMessage: string): Promise<void> {
+    try {
+      await this.db.query('SELECT fail_job($1, $2)', [jobId, errorMessage]);
+      this.logger.error(`Job failed: ${jobId} - ${errorMessage}`);
+    } catch (error) {
+      this.logger.error(`Failed to mark job as failed ${jobId}:`, error);
+      throw error;
+    }
+  }
+
   // Process next available job
   private async processNextJob(): Promise<void> {
     if (this.shouldStop) return;
 
     try {
-      const jobs = await this.db.query<QueueJob>('SELECT * FROM dequeue_job()');
+      const job = await this.dequeue();
       
-      if (jobs.length === 0) {
+      if (!job) {
         return; // No jobs available
       }
 
-      const job = jobs[0];
       this.logger.info(`Processing job ${job.job_id} (type: ${job.job_type})`);
 
       try {
         await this.executeJob(job);
-        await this.completeJob(job.job_id);
+        await this.complete(job.job_id);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        await this.failJob(job.job_id, errorMessage);
+        await this.fail(job.job_id, errorMessage);
       }
     } catch (error) {
       this.logger.error('Queue processing error:', error);
@@ -298,16 +330,6 @@ export class QueueService {
     this.logger.info(`Job ${job.job_id} completed in ${duration}ms`);
   }
 
-  // Mark job as completed
-  private async completeJob(jobId: string): Promise<void> {
-    await this.db.query('SELECT complete_job($1)', [jobId]);
-  }
-
-  // Mark job as failed
-  private async failJob(jobId: string, errorMessage: string): Promise<void> {
-    await this.db.query('SELECT fail_job($1, $2)', [jobId, errorMessage]);
-    this.logger.error(`Job ${jobId} failed: ${errorMessage}`);
-  }
 
   // Get job status
   async getJobStatus(jobId: string): Promise<any> {
