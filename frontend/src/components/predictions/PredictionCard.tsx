@@ -45,7 +45,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({ prediction }) =>
           </div>
         )}
         
-        {predictionData.key_factors && predictionData.key_factors.length > 0 && (
+        {predictionData.key_factors && Array.isArray(predictionData.key_factors) && predictionData.key_factors.length > 0 && (
           <div className="space-y-2 pt-2 border-t">
             <h4 className="text-sm font-semibold">Key Factors</h4>
             <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">

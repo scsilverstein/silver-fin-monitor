@@ -1,9 +1,9 @@
 // Feed processor factory and manager following CLAUDE.md specification
-import { FeedSource, BaseFeedProcessorDeps, FeedProcessor } from '@/types';
-import { db } from '@/services/database';
-import { cache } from '@/services/cache';
-import { queue } from '@/services/queue';
-import { logger, createContextLogger } from '@/utils/logger';
+import { FeedSource, BaseFeedProcessorDeps, FeedProcessor, Database, Cache } from '../../types';
+import { db } from '../database';
+import { cache } from '../cache';
+import { queue } from '../queue';
+import { logger, createContextLogger } from '../../utils/logger';
 import { RSSProcessor } from './rss.processor';
 import { PodcastProcessor } from './podcast.processor';
 import { YouTubeProcessor } from './youtube.processor';
@@ -43,8 +43,8 @@ export class FeedManager {
 
   constructor() {
     this.processingDeps = {
-      db,
-      cache,
+      db: db as any as Database,
+      cache: cache as any as Cache,
       logger
     };
   }
@@ -55,7 +55,7 @@ export class FeedManager {
 
     try {
       // Get feed source
-      const source = await db.findById<FeedSource>('feed_sources', sourceId);
+      const source = await (db as any).findById('feed_sources', sourceId) as FeedSource | null;
       if (!source) {
         throw new Error(`Feed source not found: ${sourceId}`);
       }
@@ -101,7 +101,7 @@ export class FeedManager {
 
     try {
       // Get raw feed with source info
-      const result = await db.query<any>(`
+      const result = await db.query(`
         SELECT rf.*, fs.type as source_type, fs.config as source_config
         FROM raw_feeds rf
         JOIN feed_sources fs ON rf.source_id = fs.id
@@ -146,13 +146,20 @@ export class FeedManager {
       });
       
       // Update feed status to failed
-      await db.update('raw_feeds', rawFeedId, {
-        processing_status: 'failed',
-        metadata: {
-          error: error instanceof Error ? error.message : String(error),
-          errorTime: new Date()
-        }
-      });
+      await db.query(
+        `UPDATE raw_feeds 
+         SET processing_status = $1, 
+             metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
+         WHERE id = $3`,
+        [
+          'failed',
+          JSON.stringify({
+            error: error instanceof Error ? error.message : String(error),
+            errorTime: new Date()
+          }),
+          rawFeedId
+        ]
+      );
       
       throw error;
     }
@@ -164,7 +171,7 @@ export class FeedManager {
 
     try {
       // Get all active feed sources
-      const sources = await db.findMany<FeedSource>('feed_sources', {
+      const sources = await (db as any).findMany('feed_sources', {
         is_active: true
       });
 

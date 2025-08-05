@@ -77,7 +77,6 @@ export class AIAnalysisService {
         .gte('created_at', sixHoursAgo.toISOString())
         .lte('created_at', date.toISOString())
         .order('created_at', { ascending: false })
-        .limit(50); // Limit to most recent 50 items for performance
 
       if (error) throw error;
 
@@ -118,7 +117,7 @@ export class AIAnalysisService {
 
       logger.info('Daily analysis saved', { 
         date: analysisDate, 
-        isUpdate: !!existing,
+        isUpdate:  !!savedAnalysis,
         sourcesAnalyzed: analysis.sources_analyzed,
         analysisId: savedAnalysis.id
       });
@@ -175,7 +174,7 @@ export class AIAnalysisService {
         
         if (rawFeed && rawFeed.source_id) {
           sourceIds.add(rawFeed.source_id);
-          const sourceName = rawFeed.feed_sources?.name || 'Unknown';
+          const sourceName = rawFeed.feed_sources?.[0]?.name || 'Unknown';
           sourceBreakdown[sourceName] = (sourceBreakdown[sourceName] || 0) + 1;
         }
       } catch (error) {
@@ -396,12 +395,18 @@ Format your response as JSON with this structure:
   ): Promise<{ text: string; confidence: number; data: any }> {
     const horizonText = horizon.replace('_', ' ');
 
-    const completion = await this.openai!.chat.completions.create({
-      model: config.openai.model,
-      messages: [
-        {
-          role: 'system',
-          content: `You are a market prediction expert. Based on the daily analysis provided, generate a specific prediction for the ${horizonText} time horizon.
+    try {
+      // Add a timeout to prevent stuck API calls
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('OpenAI API call timeout after 30 seconds')), 30000);
+      });
+
+      const completionPromise = this.openai!.chat.completions.create({
+        model: config.openai.model,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a market prediction expert. Based on the daily analysis provided, generate a specific prediction for the ${horizonText} time horizon.
 
 Prediction type: ${type}
 
@@ -413,33 +418,40 @@ Format your response as JSON:
   "key_factors": ["factor1", "factor2"],
   "measurable_outcome": "What specific outcome to measure"
 }`
-        },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            analysis_date: analysis.analysis_date,
-            market_sentiment: analysis.market_sentiment,
-            key_themes: analysis.key_themes,
-            summary: analysis.overall_summary,
-            ai_analysis: analysis.ai_analysis
-          })
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              analysis_date: analysis.analysis_date,
+              market_sentiment: analysis.market_sentiment,
+              key_themes: analysis.key_themes,
+              summary: analysis.overall_summary,
+              ai_analysis: analysis.ai_analysis
+            })
+          }
+        ],
+        response_format: { type: 'json_object' }
+      });
+
+      // Race the completion against timeout
+      const completion = await Promise.race([completionPromise, timeoutPromise]);
+
+      const messageContent = (completion as any).choices[0]?.message.content;
+      const response = messageContent ? JSON.parse(messageContent) : {};
+
+      return {
+        text: response.prediction || 'Unable to generate prediction',
+        confidence: response.confidence || 0.5,
+        data: {
+          reasoning: response.reasoning,
+          key_factors: response.key_factors,
+          measurable_outcome: response.measurable_outcome
         }
-      ],
-      response_format: { type: 'json_object' }
-    });
-
-    const messageContent = completion.choices[0]?.message.content;
-    const response = messageContent ? JSON.parse(messageContent) : {};
-
-    return {
-      text: response.prediction || 'Unable to generate prediction',
-      confidence: response.confidence || 0.5,
-      data: {
-        reasoning: response.reasoning,
-        key_factors: response.key_factors,
-        measurable_outcome: response.measurable_outcome
-      }
-    };
+      };
+    } catch (error) {
+      logger.error('Prediction generation error', { horizon, type, error });
+      throw error;
+    }
   }
 }
 

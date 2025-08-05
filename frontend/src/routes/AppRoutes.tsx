@@ -21,6 +21,11 @@ import EarningsCalendarPage from '@/pages/EarningsCalendar';
 import IntelligenceDashboard from '@/pages/IntelligenceDashboard';
 import { AnalysisOverlay } from '@/pages/AnalysisOverlay';
 import { StockScreener } from '@/pages/StockScreener';
+import { AnalysisDetail } from '@/components/analysis/AnalysisDetail';
+import { AnalysisList } from '@/pages/AnalysisList';
+import { StockScannerPage } from '@/pages/StockScannerPage';
+import { AdminDashboard } from '@/pages/AdminDashboard';
+import QueueTest from '@/pages/QueueTest';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -91,6 +96,28 @@ export const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <ModernLayout>
               <AnalysisOverlay />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
+        path="/analysis/list"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <AnalysisList />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
+        path="/analysis/:id"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <AnalysisDetail />
             </ModernLayout>
           </ProtectedRoute>
         }
@@ -174,11 +201,33 @@ export const AppRoutes: React.FC = () => {
       />
       
       <Route
+        path="/stocks/scanner"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <StockScannerPage />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
         path="/queue"
         element={
           <ProtectedRoute>
             <ModernLayout>
               <QueueManagement />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
+        path="/queue-test"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <QueueTest />
             </ModernLayout>
           </ProtectedRoute>
         }
@@ -211,7 +260,7 @@ export const AppRoutes: React.FC = () => {
         element={
           <ProtectedRoute>
             <ModernLayout>
-              <Admin />
+              <AdminDashboard />
             </ModernLayout>
           </ProtectedRoute>
         }

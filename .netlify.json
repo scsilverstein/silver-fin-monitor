@@ -1,0 +1,14 @@
+{
+  "dev": {
+    "framework": "#auto",
+    "targetPort": 5173,
+    "functionsPort": 9999,
+    "liveReload": true,
+    "command": "npm run dev:frontend"
+  },
+  "functions": {
+    "api": {
+      "external_node_modules": ["aws-sdk"]
+    }
+  }
+}

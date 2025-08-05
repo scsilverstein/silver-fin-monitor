@@ -586,7 +586,7 @@ CREATE INDEX idx_fundamental_metrics_entity_date ON fundamental_metrics(entity_i
 CREATE INDEX idx_earnings_events_date ON earnings_events(earnings_date DESC);
 CREATE INDEX idx_earnings_events_entity ON earnings_events(entity_id, earnings_date DESC);
 CREATE INDEX idx_earnings_events_upcoming ON earnings_events(earnings_date) 
-    WHERE has_reported = false AND earnings_date >= CURRENT_DATE;
+    WHERE has_reported = false;
 
 -- Options indexes
 CREATE INDEX idx_options_chains_entity_exp ON options_chains(entity_id, expiration);
@@ -789,7 +789,7 @@ SELECT
     la.volatility_30d,
     fm.market_cap,
     fm.pe_ratio,
-    fm.volume as avg_volume
+    fm.avg_volume_30d as avg_volume
 FROM latest_analytics la
 JOIN entities e ON la.entity_id = e.id
 JOIN entity_classifications ec ON e.id = ec.entity_id AND ec.classification_type = 'primary'
@@ -823,9 +823,7 @@ CREATE POLICY "Public entities are viewable by everyone"
     ON entities FOR SELECT 
     USING (is_active = true);
 
-CREATE POLICY "Users can insert their own watchlist items"
-    ON peer_group_members FOR INSERT
-    WITH CHECK (auth.uid() = user_id);
+-- Peer group policies can be added when user system is implemented
 
 -- =====================================================
 -- PART 12: INITIAL DATA SEEDS

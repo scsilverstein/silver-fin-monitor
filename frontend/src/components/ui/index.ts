@@ -26,12 +26,12 @@ export { Skeleton as LegacySkeleton } from './Skeleton';
 export { ModernCard as Card } from './ModernCard';
 
 // Additional exports for queue management
-export * from './alert';
+export * from './Alert';
 export { Card as LegacyCard, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from './Card';
-export { SelectRoot, SelectTrigger, SelectContent, SelectItem, SelectValue } from './Select';
+export { Select as SelectRoot, SelectTrigger, SelectContent, SelectItem, SelectValue } from './Select';
 
 // Export tabs component
-export * from './tabs';
+export * from './Tabs';
 
 // Export ScrollArea component
 export * from './ScrollArea';

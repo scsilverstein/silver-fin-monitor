@@ -126,7 +126,7 @@ export const EnhancedMarketIntelligence: React.FC<EnhancedMarketIntelligenceProp
                   overview.marketSentiment === 'bearish' ? 'bg-red-100 text-red-700' :
                   'bg-gray-100 text-gray-700'
                 }`}>
-                  {overview.marketSentiment.charAt(0).toUpperCase() + overview.marketSentiment.slice(1)}
+                  {overview.marketSentiment?.charAt(0)?.toUpperCase() + overview.marketSentiment.slice(1)}
                 </span>
               )}
             </CardTitle>
@@ -197,13 +197,13 @@ export const EnhancedMarketIntelligence: React.FC<EnhancedMarketIntelligenceProp
         {/* Market Drivers & Risk Factors */}
         {(() => {
           // Use timeframe-specific data if available, otherwise fall back to overview data
-          const currentMarketDrivers = selectedTimeframe !== 'today' && marketDrivers?.[selectedTimeframe]?.length > 0
+          const currentMarketDrivers = selectedTimeframe !== 'today' && marketDrivers && marketDrivers[selectedTimeframe] && marketDrivers[selectedTimeframe].length > 0
             ? marketDrivers[selectedTimeframe]
-            : overview?.marketDrivers || [];
+            : overview?.marketDrivers ?? [];
           
-          const currentRiskFactors = selectedTimeframe !== 'today' && riskFactors?.[selectedTimeframe]?.length > 0
-            ? riskFactors[selectedTimeframe]
-            : overview?.riskFactors || [];
+          const currentRiskFactors = selectedTimeframe !== 'today' && riskFactors && riskFactors[selectedTimeframe] && riskFactors[selectedTimeframe].length > 0
+            ? riskFactors[selectedTimeframe] 
+            : overview?.riskFactors ?? [];
 
           // Show section if we have any data
           const hasData = currentMarketDrivers.length > 0 || currentRiskFactors.length > 0;

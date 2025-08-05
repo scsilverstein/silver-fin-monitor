@@ -83,45 +83,33 @@ export class DatabaseQueueService {
 
   async dequeue(): Promise<QueueJob | null> {
     try {
-      // First, find a job to process
-      const { data: jobs, error: selectError } = await supabase
-        .from('job_queue')
-        .select('*')
-        .in('status', ['pending', 'retry'])
-        .lte('scheduled_at', new Date().toISOString())
-        .lt('attempts', 3)
-        .order('priority', { ascending: true })
-        .order('scheduled_at', { ascending: true })
-        .limit(1);
+      // Use the atomic database function to dequeue a job
+      const { data, error } = await supabase
+        .rpc('dequeue_job');
 
-      if (selectError || !jobs || jobs.length === 0) {
+      if (error) {
+        logger.error('Failed to dequeue job', { error });
         return null;
       }
 
-      const job = jobs[0];
-
-      // Update the job to mark it as processing
-      const { error: updateError } = await supabase
-        .from('job_queue')
-        .update({
-          status: 'processing',
-          started_at: new Date().toISOString(),
-          attempts: job.attempts + 1
-        })
-        .eq('id', job.id)
-        .eq('status', job.status); // Ensure it hasn't been picked up by another worker
-
-      if (updateError) {
-        logger.error('Failed to update job status', { error: updateError });
+      if (!data || data.length === 0) {
         return null;
       }
+
+      const job = data[0];
+      
+      logger.debug('Job dequeued', { 
+        jobId: job.job_id, 
+        jobType: job.job_type,
+        attempts: job.attempts 
+      });
 
       return {
-        job_id: job.id,
+        job_id: job.job_id,
         job_type: job.job_type,
         payload: job.payload,
         priority: job.priority,
-        attempts: job.attempts + 1
+        attempts: job.attempts
       };
     } catch (error) {
       logger.error('Dequeue error', { error });
@@ -131,16 +119,16 @@ export class DatabaseQueueService {
 
   async complete(jobId: string): Promise<void> {
     try {
-      const { error } = await supabase
-        .from('job_queue')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', jobId);
+      const { data, error } = await supabase
+        .rpc('complete_job', { job_id: jobId });
         
       if (error) throw error;
-      logger.info('Job completed', { jobId });
+      
+      if (!data) {
+        logger.warn('Job not found or already completed', { jobId });
+      } else {
+        logger.info('Job marked as completed', { jobId });
+      }
     } catch (error) {
       logger.error('Failed to complete job', { jobId, error });
       throw error;
@@ -149,48 +137,19 @@ export class DatabaseQueueService {
 
   async fail(jobId: string, errorMessage: string): Promise<void> {
     try {
-      // First get the job to check attempts
-      const { data: job, error: fetchError } = await supabase
-        .from('job_queue')
-        .select('attempts, max_attempts')
-        .eq('id', jobId)
-        .single();
-
-      if (fetchError || !job) {
-        throw new Error('Job not found');
-      }
-
-      if (job.attempts >= job.max_attempts) {
-        // Max attempts reached, mark as failed
-        const { error } = await supabase
-          .from('job_queue')
-          .update({
-            status: 'failed',
-            error_message: errorMessage,
-            completed_at: new Date().toISOString()
-          })
-          .eq('id', jobId);
-          
-        if (error) throw error;
-      } else {
-        // Retry with exponential backoff
-        const retryDelay = Math.pow(2, job.attempts) * 60; // minutes
-        const scheduledAt = new Date();
-        scheduledAt.setSeconds(scheduledAt.getSeconds() + retryDelay);
-
-        const { error } = await supabase
-          .from('job_queue')
-          .update({
-            status: 'retry',
-            error_message: errorMessage,
-            scheduled_at: scheduledAt.toISOString()
-          })
-          .eq('id', jobId);
-          
-        if (error) throw error;
-      }
+      const { data, error } = await supabase
+        .rpc('fail_job', { 
+          job_id: jobId, 
+          error_msg: errorMessage 
+        });
+        
+      if (error) throw error;
       
-      logger.info('Job marked as failed', { jobId });
+      if (!data) {
+        logger.warn('Job not found or already failed', { jobId });
+      } else {
+        logger.info('Job marked as failed/retry', { jobId, errorMessage });
+      }
     } catch (error) {
       logger.error('Failed to mark job as failed', { jobId, error });
       throw error;
@@ -246,9 +205,9 @@ export class DatabaseQueueService {
   private async processStockScannerJob(jobType: string, payload: any): Promise<void> {
     // Lazy load the stock scanner processor to avoid circular dependencies
     const { StockScannerJobProcessor } = await import('../stock/stock-scanner-jobs');
-    const { cacheService } = await import('../cache');
+    const { cache } = await import('../cache');
     
-    const processor = new StockScannerJobProcessor(cacheService, this);
+    const processor = new StockScannerJobProcessor(cache, this);
     await processor.processJob(jobType, payload);
   }
 }

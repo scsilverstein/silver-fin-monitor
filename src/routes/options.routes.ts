@@ -1,16 +1,13 @@
 import { Router } from 'express';
 import { OptionsController } from '../controllers/options.controller';
-import { authMiddleware } from '../middleware/auth.middleware';
-import { validateRequest } from '../middleware/validation.middleware';
-import { body, param, query } from 'express-validator';
-import { QueueService } from '../services/queue.service';
+import { authenticateToken } from '../middleware/auth';
 
-export const createOptionsRoutes = (queueService: QueueService): Router => {
+export const createOptionsRoutes = (): Router => {
   const router = Router();
-  const optionsController = new OptionsController(queueService);
+  const optionsController = new OptionsController();
 
   // All routes require authentication
-  router.use(authMiddleware);
+  router.use(authenticateToken);
 
   /**
    * @route POST /api/options/tech-universe/initialize
@@ -49,13 +46,6 @@ export const createOptionsRoutes = (queueService: QueueService): Router => {
    */
   router.get(
     '/chain/:symbol',
-    [
-      param('symbol').isString().isUppercase().isLength({ min: 1, max: 10 }),
-      query('expiration').optional().isISO8601(),
-      query('minStrike').optional().isNumeric(),
-      query('maxStrike').optional().isNumeric()
-    ],
-    validateRequest,
     optionsController.getOptionsChain
   );
 
@@ -66,10 +56,6 @@ export const createOptionsRoutes = (queueService: QueueService): Router => {
    */
   router.get(
     '/analyze/:contractId',
-    [
-      param('contractId').isUUID()
-    ],
-    validateRequest,
     optionsController.analyzeOption
   );
 
@@ -80,18 +66,6 @@ export const createOptionsRoutes = (queueService: QueueService): Router => {
    */
   router.get(
     '/search',
-    [
-      query('minVolume').optional().isInt({ min: 0 }),
-      query('minOpenInterest').optional().isInt({ min: 0 }),
-      query('maxSpreadRatio').optional().isFloat({ min: 0, max: 1 }),
-      query('minDTE').optional().isInt({ min: 0 }),
-      query('maxDTE').optional().isInt({ min: 0 }),
-      query('minIVRank').optional().isFloat({ min: 0, max: 100 }),
-      query('maxIVRank').optional().isFloat({ min: 0, max: 100 }),
-      query('minValueScore').optional().isFloat({ min: 0, max: 100 }),
-      query('techOnly').optional().isBoolean()
-    ],
-    validateRequest,
     optionsController.searchOptions
   );
 
@@ -112,10 +86,6 @@ export const createOptionsRoutes = (queueService: QueueService): Router => {
    */
   router.get(
     '/value-opportunities',
-    [
-      query('minScore').optional().isFloat({ min: 0, max: 100 })
-    ],
-    validateRequest,
     optionsController.getValueOpportunities
   );
 

@@ -3,8 +3,37 @@ import { processFeed } from '../feeds/processor';
 import { contentProcessor } from '../content/processor';
 import { aiAnalysisService } from '../ai/analysis';
 import { logger } from '@/utils/logger';
-import { db } from '../database';
+import { db } from '../database/index';
 import { cache } from '../cache';
+import { PredictionComparisonService } from '../prediction/prediction-comparison.service';
+import { v4 as uuidv4 } from 'uuid';
+import { DatabaseService } from '../database/db.service';
+import { CacheService } from '../cache/cache.service';
+import { OpenAIService } from '../ai/openai.service';
+import winston from 'winston';
+
+// Create services with dependencies
+const dbService = new DatabaseService(
+  { 
+    url: process.env.SUPABASE_URL || '', 
+    anonKey: process.env.SUPABASE_ANON_KEY || '',
+    serviceKey: process.env.SUPABASE_SERVICE_KEY || ''
+  },
+  logger as winston.Logger
+);
+const cacheService = new CacheService(dbService, logger as winston.Logger);
+const openaiService = new OpenAIService(
+  dbService,
+  cacheService,
+  logger as winston.Logger
+);
+
+const predictionComparisonService = new PredictionComparisonService(
+  dbService,
+  cacheService,
+  openaiService,
+  logger as winston.Logger
+);
 
 interface JobHandlers {
   [key: string]: (payload: any) => Promise<void>;
@@ -14,6 +43,19 @@ export class QueueWorker {
   private isRunning = false;
   private shouldStop = false;
   private processInterval: NodeJS.Timeout | null = null;
+  private concurrency: number;
+  private activeJobs: Set<string> = new Set();
+  private workerPromises: Promise<void>[] = [];
+
+  constructor() {
+    // Get concurrency from environment or default to 5
+    this.concurrency = parseInt(process.env.JOB_CONCURRENCY || '5', 10);
+    // Limit max concurrency to prevent excessive load
+    if (this.concurrency > 20) {
+      logger.warn('Very high concurrency detected, limiting to 20 workers', { requested: this.concurrency });
+      this.concurrency = 20;
+    }
+  }
 
   private handlers: JobHandlers = {
     feed_fetch: async (payload) => {
@@ -21,7 +63,13 @@ export class QueueWorker {
     },
     
     content_process: async (payload) => {
-      // Get raw feed ID based on source and external ID
+      // If we already have the raw feed ID, use it directly
+      if (payload.rawFeedId) {
+        await contentProcessor.processContent(payload.rawFeedId);
+        return;
+      }
+      
+      // Otherwise, look it up based on source and external ID
       const { data: rawFeed } = await db.getClient()
         .from('raw_feeds')
         .select('id')
@@ -49,8 +97,53 @@ export class QueueWorker {
     },
     
     prediction_compare: async (payload) => {
-      // TODO: Implement prediction comparison
-      logger.info('Prediction comparison not yet implemented', payload);
+      const { predictionId, analysisDate } = payload;
+      
+      if (!predictionId || !analysisDate) {
+        logger.error('Invalid prediction comparison payload', payload);
+        throw new Error('Missing required fields: predictionId, analysisDate');
+      }
+      
+      try {
+        logger.info('Starting prediction comparison', { predictionId, analysisDate });
+        
+        // Get the prediction to compare
+        const prediction = await db.findById('predictions', predictionId);
+        if (!prediction) {
+          throw new Error(`Prediction not found: ${predictionId}`);
+        }
+        
+        // Get the current analysis for comparison
+        const currentAnalysis = await db.findById('daily_analysis', analysisDate);
+        if (!currentAnalysis) {
+          throw new Error(`Daily analysis not found for date: ${analysisDate}`);
+        }
+        
+        // Compare prediction with actual outcome
+        const comparisonResult = await predictionComparisonService.evaluatePrediction(
+          prediction as any
+        );
+        
+        // Store comparison result
+        await db.create('prediction_comparisons', {
+          id: uuidv4(),
+          comparison_date: new Date(),
+          previous_prediction_id: predictionId,
+          current_analysis_id: (currentAnalysis as any).id,
+          accuracy_score: comparisonResult.accuracy_score,
+          outcome_description: comparisonResult.outcome_description,
+          comparison_analysis: comparisonResult.comparison_analysis,
+          created_at: new Date()
+        });
+        
+        logger.info('Prediction comparison completed', { 
+          predictionId, 
+          accuracyScore: comparisonResult.accuracy_score 
+        });
+      } catch (error) {
+        logger.error('Prediction comparison failed', { predictionId, error });
+        throw error;
+      }
     },
     
     transcribe_audio: async (payload) => {
@@ -288,15 +381,17 @@ export class QueueWorker {
       return;
     }
 
-    logger.info('Starting queue worker');
+    logger.info('Starting queue worker', { concurrency: this.concurrency });
     this.isRunning = true;
     this.shouldStop = false;
 
-    // Process jobs continuously
-    this.processJobs().catch(error => {
-      logger.error('Queue worker crashed', { error });
-      this.isRunning = false;
-    });
+    // Start multiple concurrent workers
+    for (let i = 0; i < this.concurrency; i++) {
+      const workerPromise = this.processJobsWorker(i).catch(error => {
+        logger.error('Queue worker crashed', { workerId: i, error });
+      });
+      this.workerPromises.push(workerPromise);
+    }
 
     // Also set up periodic tasks
     this.setupPeriodicTasks();
@@ -312,15 +407,22 @@ export class QueueWorker {
       this.processInterval = null;
     }
 
-    // Wait for current processing to finish
-    while (this.isRunning) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+    // Wait for all worker promises to finish
+    await Promise.all(this.workerPromises);
+    
+    // Wait for active jobs to complete
+    while (this.activeJobs.size > 0) {
+      logger.info('Waiting for active jobs to complete', { activeJobs: this.activeJobs.size });
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
+    this.isRunning = false;
     logger.info('Queue worker stopped');
   }
 
-  private async processJobs(): Promise<void> {
+  private async processJobsWorker(workerId: number): Promise<void> {
+    logger.info('Starting worker', { workerId });
+
     while (!this.shouldStop) {
       try {
         // Get next job from queue
@@ -332,35 +434,65 @@ export class QueueWorker {
           continue;
         }
 
+        // Track active job
+        this.activeJobs.add(job.job_id);
+
         logger.info('Processing job', { 
+          workerId,
           jobId: job.job_id,
           jobType: job.job_type,
-          attempts: job.attempts 
+          attempts: job.attempts,
+          activeJobs: this.activeJobs.size
         });
 
         // Execute job handler
         const handler = this.handlers[job.job_type];
         if (!handler) {
+          this.activeJobs.delete(job.job_id);
           throw new Error(`No handler for job type: ${job.job_type}`);
         }
 
         try {
           await handler(job.payload);
           await queueService.complete(job.job_id);
-          logger.info('Job completed successfully', { jobId: job.job_id });
+          logger.info('Job completed successfully', { 
+            workerId,
+            jobId: job.job_id,
+            jobType: job.job_type,
+            activeJobs: this.activeJobs.size - 1
+          });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           await queueService.fail(job.job_id, errorMessage);
-          logger.error('Job failed', { jobId: job.job_id, error });
+          logger.error('Job failed', { 
+            workerId,
+            jobId: job.job_id,
+            jobType: job.job_type,
+            error: errorMessage 
+          });
+        } finally {
+          // Remove from active jobs
+          this.activeJobs.delete(job.job_id);
         }
 
       } catch (error) {
-        logger.error('Queue processing error', { error });
+        logger.error('Queue processing error', { workerId, error });
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
 
-    this.isRunning = false;
+    logger.info('Worker stopped', { workerId });
+  }
+
+  // Method to get current worker status
+  getStatus() {
+    return {
+      isRunning: this.isRunning,
+      concurrency: this.concurrency,
+      activeJobs: this.activeJobs.size,
+      activeJobIds: Array.from(this.activeJobs),
+      workerCount: this.workerPromises.length
+    };
   }
 
   private setupPeriodicTasks(): void {

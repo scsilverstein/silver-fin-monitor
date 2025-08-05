@@ -1,6 +1,6 @@
 // Whisper service controller for monitoring and controlling transcription service
 import { Request, Response, NextFunction } from 'express';
-import { db } from '@/services/database';
+import { db } from '@/services/database/index';
 import { asyncHandler, AsyncHandler } from '@/middleware/error';
 import { ApiResponse } from '@/types';
 import { createContextLogger } from '@/utils/logger';

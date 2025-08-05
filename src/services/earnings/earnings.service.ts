@@ -45,7 +45,10 @@ export class EarningsService {
         throw new Error(`Polygon API error: ${response.status} ${response.statusText}`);
       }
 
-      const data: PolygonEarningsResponse = await response.json();
+      const rawData = await response.json();
+      const data: PolygonEarningsResponse = rawData && typeof rawData === 'object' 
+        ? { ...rawData, status: rawData.status || 'ok' } 
+        : { status: 'error', results: [] };
       
       if (!data.results) {
         logger.warn('No earnings results from Polygon');
@@ -89,7 +92,7 @@ export class EarningsService {
   async storeEarningsCalendar(earnings: EarningsCalendar[]): Promise<void> {
     try {
       for (const earning of earnings) {
-        await this.db.query(`
+        await (this.db as any).query(`
           INSERT INTO earnings_calendar (
             symbol, company_name, earnings_date, time_of_day, fiscal_quarter, fiscal_year,
             eps_estimate, revenue_estimate, eps_actual, revenue_actual,
@@ -165,7 +168,7 @@ export class EarningsService {
         throw new Error(`SEC API error: ${response.status} ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as any;
       
       // Filter filings by date and type
       const filings = data.filings?.recent;
@@ -239,7 +242,7 @@ export class EarningsService {
     cik: string
   ): Promise<string> {
     try {
-      const result = await this.db.query(`
+      const result = await (this.db as any).query(`
         INSERT INTO earnings_reports (
           earnings_calendar_id, filing_type, filing_date, accession_number,
           cik, document_text, processing_status
@@ -318,7 +321,7 @@ export class EarningsService {
 
       params.push(limit, offset);
 
-      const results = await this.db.query(query, params);
+      const results = await (this.db as any).query(query, params);
       return results;
     } catch (error) {
       logger.error('Error getting earnings calendar', error);
@@ -331,7 +334,7 @@ export class EarningsService {
    */
   async getEarningsWithReports(symbol: string, earningsDate: string): Promise<any> {
     try {
-      const result = await this.db.query(
+      const result = await (this.db as any).query(
         'SELECT get_earnings_with_reports($1, $2) as data',
         [symbol, earningsDate]
       );
@@ -349,7 +352,7 @@ export class EarningsService {
   async processEarningsReport(reportId: string): Promise<void> {
     try {
       // Get report content
-      const report = await this.db.query(
+      const report = await (this.db as any).query(
         'SELECT * FROM earnings_reports WHERE id = $1',
         [reportId]
       );
@@ -361,7 +364,7 @@ export class EarningsService {
       const reportData = report[0];
       
       // Update status to processing
-      await this.db.query(
+      await (this.db as any).query(
         'UPDATE earnings_reports SET processing_status = $1 WHERE id = $2',
         ['processing', reportId]
       );
@@ -371,7 +374,7 @@ export class EarningsService {
       
       // Store sections
       for (const section of sections) {
-        await this.db.query(`
+        await (this.db as any).query(`
           INSERT INTO earnings_report_sections (
             earnings_report_id, section_type, section_title, section_content, section_order
           ) VALUES ($1, $2, $3, $4, $5)
@@ -382,7 +385,7 @@ export class EarningsService {
       // await this.analyzeReportWithAI(reportId);
 
       // Update status to completed
-      await this.db.query(
+      await (this.db as any).query(
         'UPDATE earnings_reports SET processing_status = $1, processed_at = NOW() WHERE id = $2',
         ['completed', reportId]
       );
@@ -392,7 +395,7 @@ export class EarningsService {
       logger.error('Error processing earnings report', error);
       
       // Update status to failed
-      await this.db.query(
+      await (this.db as any).query(
         'UPDATE earnings_reports SET processing_status = $1 WHERE id = $2',
         ['failed', reportId]
       );
@@ -465,7 +468,7 @@ export class EarningsService {
 
   private async queueReportProcessing(reportId: string): Promise<void> {
     // Queue processing job using your existing queue system
-    await this.db.query(`
+    await (this.db as any).query(`
       INSERT INTO job_queue (job_type, payload, priority)
       VALUES ('earnings_report_process', $1, 3)
     `, [JSON.stringify({ reportId })]);

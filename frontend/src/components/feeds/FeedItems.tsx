@@ -17,7 +17,17 @@ interface FeedItem {
   published_at: string;
   processing_status: string;
   external_id?: string;
-  metadata?: any;
+  metadata?: {
+    link?: string;
+    url?: string;
+    audio_url?: string;
+    audioUrl?: string;
+    duration?: string;
+    transcription?: {
+      text?: string;
+    };
+    [key: string]: any;
+  };
   content?: string;
   hasTranscription?: boolean;
   isAudioContent?: boolean;
@@ -34,6 +44,26 @@ interface FeedItemsProps {
   onViewContent?: (item: FeedItem) => void;
   onViewTranscript?: (item: FeedItem) => void;
 }
+
+const formatDate = (dateString: string | null | undefined): string => {
+  if (!dateString) return 'Date not available';
+  
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      return 'Date not available';
+    }
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch (error) {
+    return 'Date not available';
+  }
+};
 
 export const FeedItems: React.FC<FeedItemsProps> = ({
   items,
@@ -84,16 +114,21 @@ export const FeedItems: React.FC<FeedItemsProps> = ({
         >
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
-              <h4 className="text-sm font-medium truncate">
-                {item.title}
+              <h4 className="text-sm font-medium line-clamp-2">
+                {item.title || 'Untitled Item'}
               </h4>
               <div className="flex items-center gap-3 mt-1">
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Calendar className="h-3 w-3" />
-                  {new Date(item.published_at).toLocaleDateString()}
+                  {formatDate(item.published_at)}
                 </span>
                 {getStatusBadge(item.processing_status)}
               </div>
+              {item.description && (
+                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                  {item.description}
+                </p>
+              )}
             </div>
             
             <div className="flex items-center gap-1">
@@ -139,11 +174,17 @@ export const FeedItems: React.FC<FeedItemsProps> = ({
                 </ModernButton>
               )}
               
-              {item.external_id && (
+              {(item.metadata?.link || item.metadata?.url) && (
                 <ModernButton
                   variant="ghost"
                   size="sm"
-                  onClick={() => window.open(item.external_id, '_blank')}
+                  onClick={() => {
+                    const url = item.metadata?.link || item.metadata?.url;
+                    console.log('Opening URL:', url, 'from item:', item);
+                    if (url) {
+                      window.open(url, '_blank');
+                    }
+                  }}
                   title="View original"
                 >
                   <ExternalLink className="h-4 w-4" />

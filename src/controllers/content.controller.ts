@@ -1,7 +1,7 @@
 // Content management controller following CLAUDE.md specification
 import { Request, Response } from 'express';
-import { db } from '@/services/database';
-import { cache, cacheKeys, cacheTtl } from '@/services/cache';
+import { db } from '@/services/database/index';
+import { cache, cacheKeys, cacheTtl } from '@/services/cache/index';
 import { ProcessedContent, RawFeed, ApiResponse } from '@/types';
 import { asyncHandler } from '@/middleware/error';
 import { NotFoundError } from '@/middleware/error';

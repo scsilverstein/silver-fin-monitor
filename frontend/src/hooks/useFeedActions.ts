@@ -49,10 +49,10 @@ export const useFeedActions = (
     setUpdatingFeeds(prev => new Set(prev).add(feedId));
     try {
       setFeeds(
-        feeds.map(f => f.id === feedId ? { ...f, isActive: !currentActive } : f)
+        feeds.map(f => f.id === feedId ? { ...f, is_active: !currentActive } : f)
       );
       
-      const updatedFeed = await feedsApi.update(feedId, { isActive: !currentActive });
+      const updatedFeed = await feedsApi.update(feedId, { is_active: !currentActive });
       
       setFeeds(
         feeds.map(f => f.id === feedId ? updatedFeed : f)
@@ -60,7 +60,7 @@ export const useFeedActions = (
     } catch (error) {
       console.error('Failed to toggle feed active state:', error);
       setFeeds(
-        feeds.map(f => f.id === feedId ? { ...f, isActive: currentActive } : f)
+        feeds.map(f => f.id === feedId ? { ...f, is_active: currentActive } : f)
       );
       throw error;
     } finally {

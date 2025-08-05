@@ -46,7 +46,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({
       variant="bordered" 
       className={cn(
         "hover:shadow-lg transition-all duration-200 hover-lift",
-        !feed.isActive && "opacity-60"
+        !feed.is_active && "opacity-60"
       )}
     >
       <CardHeader className="pb-3">
@@ -58,15 +58,15 @@ export const FeedCard: React.FC<FeedCardProps> = ({
             <div className="flex-1 min-w-0">
               <CardTitle className="text-base flex items-center gap-2">
                 {feed.name}
-                {!feed.isActive && (
+                {!feed.is_active && (
                   <ModernBadge variant="secondary" size="sm">
                     Inactive
                   </ModernBadge>
                 )}
               </CardTitle>
-              {feed.lastProcessedAt && (
+              {feed.last_processed_at && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Last processed: {new Date(feed.lastProcessedAt).toLocaleString()}
+                  Last processed: {new Date(feed.last_processed_at).toLocaleString()}
                 </p>
               )}
               
@@ -86,7 +86,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({
               onClick={onToggleActive}
               disabled={updating}
             >
-              {feed.isActive ? (
+              {feed.is_active ? (
                 <Power className="h-4 w-4 text-success" />
               ) : (
                 <PowerOff className="h-4 w-4 text-muted-foreground" />
@@ -97,7 +97,7 @@ export const FeedCard: React.FC<FeedCardProps> = ({
               variant="ghost"
               size="sm"
               onClick={onProcess}
-              disabled={!feed.isActive}
+              disabled={!feed.is_active}
             >
               <RefreshCw className="h-4 w-4" />
             </ModernButton>

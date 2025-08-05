@@ -32,7 +32,9 @@ export const SummaryOverlay: React.FC<SummaryOverlayProps> = ({
 }) => {
   // Process summary to optionally remove time/market references
   const processedSummary = useMemo(() => {
-    let summary = analysis.overall_summary;
+    let summary = analysis.overall_summary || '';
+
+    if (!summary) return '';
 
     if (!showTimeReferences) {
       // Remove time references like "this week", "today", "yesterday", dates, etc.
@@ -119,7 +121,7 @@ export const SummaryOverlay: React.FC<SummaryOverlayProps> = ({
       <CardContent className="space-y-3">
         {/* Key Themes */}
         <div className="flex flex-wrap gap-1">
-          {analysis.key_themes.slice(0, 3).map((theme, index) => (
+          {analysis.key_themes && Array.isArray(analysis.key_themes) && analysis.key_themes.slice(0, 3).map((theme, index) => (
             <Badge 
               key={index} 
               variant="secondary" 
@@ -128,7 +130,7 @@ export const SummaryOverlay: React.FC<SummaryOverlayProps> = ({
               {theme}
             </Badge>
           ))}
-          {analysis.key_themes.length > 3 && (
+          {analysis.key_themes && Array.isArray(analysis.key_themes) && analysis.key_themes.length > 3 && (
             <Badge 
               variant="outline" 
               className="text-xs px-2 py-0.5"

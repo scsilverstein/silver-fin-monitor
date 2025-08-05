@@ -1,24 +1,46 @@
 // Analysis manager for orchestrating AI analysis following CLAUDE.md specification
-import { db } from '@/services/database';
-import { cache, cacheKeys, cacheTtl } from '@/services/cache';
-import { queue } from '@/services/queue';
-import { aiService } from './openai.service';
-import { DailyAnalysis, ProcessedContent, Prediction, PredictionComparison } from '@/types';
-import { createContextLogger } from '@/utils/logger';
+import { db } from '../database/index';
+import { cache, cacheKeys, cacheTtl } from '../cache/index';
+import { queueService } from '../database/queue';
+import OpenAIService from './openai.service';
+import { DailyAnalysis, ProcessedContent, Prediction, PredictionComparison } from '../../types';
+import { createContextLogger } from '../../utils/logger';
 
 const analysisLogger = createContextLogger('AnalysisManager');
 
 export class AnalysisManager {
+  private aiService: OpenAIService;
+
+  constructor() {
+    // Import required dependencies
+    const { DatabaseService } = require('../database/db.service');
+    const { CacheService } = require('../cache/cache.service');
+    const winston = require('winston');
+    
+    // Create logger instance
+    const logger = winston.createLogger({
+      level: 'info',
+      format: winston.format.json(),
+      transports: [new winston.transports.Console()]
+    });
+    
+    this.aiService = new OpenAIService(
+      new DatabaseService(),
+      new CacheService(),
+      logger
+    );
+  }
   // Generate daily analysis for a specific date
   async generateDailyAnalysis(date: string): Promise<void> {
     analysisLogger.info('Starting daily analysis generation', { date });
 
     try {
       // Check if analysis already exists
-      const existing = await db.query<DailyAnalysis>(
-        'SELECT id FROM daily_analysis WHERE analysis_date = $1',
-        [date]
-      );
+      const { data: existing, error } = await db.from('daily_analysis')
+        .select('id')
+        .eq('analysis_date', date);
+      
+      if (error) throw error;
 
       if (existing.length > 0) {
         analysisLogger.warn('Analysis already exists for date', { date });
@@ -39,22 +61,10 @@ export class AnalysisManager {
       });
 
       // Generate analysis using AI
-      const analysisResult = await aiService.generateDailyAnalysis(content);
-      
-      if (!analysisResult.success || !analysisResult.data) {
-        throw analysisResult.error || new Error('Failed to generate analysis');
-      }
+      const analysisResult = await this.aiService.generateDailyAnalysis(new Date(date));
 
-      // Save analysis to database
-      const savedAnalysis = await db.create<DailyAnalysis>('daily_analysis', {
-        analysisDate: new Date(date),
-        marketSentiment: analysisResult.data.marketSentiment || 'neutral',
-        keyThemes: analysisResult.data.keyThemes,
-        overallSummary: analysisResult.data.overallSummary || '',
-        aiAnalysis: analysisResult.data.aiAnalysis,
-        confidenceScore: analysisResult.data.confidenceScore || 0.5,
-        sourcesAnalyzed: analysisResult.data.sourcesAnalyzed
-      });
+      // The analysis is already saved by the AI service
+      const savedAnalysis = analysisResult;
 
       analysisLogger.info('Daily analysis saved', { 
         analysisId: savedAnalysis.id,
@@ -88,31 +98,16 @@ export class AnalysisManager {
 
     try {
       // Generate predictions using AI
-      const predictionsResult = await aiService.generatePredictions(analysis);
-      
-      if (!predictionsResult.success || !predictionsResult.data) {
-        throw predictionsResult.error || new Error('Failed to generate predictions');
-      }
+      const predictionsResult = await this.aiService.generatePredictions(analysis);
 
-      // Save predictions to database
-      for (const prediction of predictionsResult.data) {
-        await db.create<Prediction>('predictions', {
-          dailyAnalysisId: analysis.id,
-          predictionType: prediction.predictionType || 'general',
-          predictionText: prediction.predictionText || '',
-          confidenceLevel: prediction.confidenceLevel || 0.5,
-          timeHorizon: prediction.timeHorizon,
-          predictionData: prediction.predictionData
-        });
-      }
+      // Schedule future comparisons for these predictions
+      await this.schedulePredictionComparisons(predictionsResult);
 
       analysisLogger.info('Predictions saved', { 
         analysisId: analysis.id,
-        count: predictionsResult.data.length 
+        count: predictionsResult.length 
       });
 
-      // Queue future comparison jobs
-      await this.schedulePredictionComparisons(predictionsResult.data);
     } catch (error) {
       analysisLogger.error('Failed to generate predictions', { 
         analysisId: analysis.id,
@@ -131,16 +126,21 @@ export class AnalysisManager {
 
     try {
       // Get prediction
-      const prediction = await db.findById<Prediction>('predictions', predictionId);
-      if (!prediction) {
+      const { data: prediction, error: predError } = await db.from('predictions')
+        .select('*')
+        .eq('id', predictionId)
+        .single();
+        
+      if (predError || !prediction) {
         throw new Error(`Prediction not found: ${predictionId}`);
       }
 
       // Get current analysis for comparison date
-      const analysisResult = await db.query<DailyAnalysis>(
-        'SELECT * FROM daily_analysis WHERE analysis_date = $1',
-        [comparisonDate]
-      );
+      const { data: analysisResult, error: analysisError } = await db.from('daily_analysis')
+        .select('*')
+        .eq('analysis_date', comparisonDate);
+        
+      if (analysisError) throw analysisError;
 
       if (!analysisResult || analysisResult.length === 0) {
         // No analysis for comparison date yet, reschedule
@@ -149,7 +149,7 @@ export class AnalysisManager {
           comparisonDate 
         });
         
-        await queue.enqueue('prediction_comparison', {
+        await queueService.enqueue('prediction_comparison', {
           predictionId,
           date: comparisonDate
         }, 5, 86400); // Retry in 24 hours
@@ -171,7 +171,7 @@ export class AnalysisManager {
       }
 
       // Compare using AI
-      const comparisonResult = await aiService.comparePredictions(
+      const comparisonResult = await this.aiService.comparePredictions(
         prediction,
         currentAnalysis
       );
@@ -181,11 +181,11 @@ export class AnalysisManager {
       }
 
       // Save comparison
-      await db.create<PredictionComparison>('prediction_comparisons', {
-        comparisonDate: new Date(comparisonDate),
-        previousPredictionId: predictionId,
-        currentAnalysisId: currentAnalysis.id,
-        accuracyScore: comparisonResult.data.accuracyScore,
+      const { error: compError } = await db.from('prediction_comparisons').insert({
+        comparison_date: new Date(comparisonDate),
+        previous_prediction_id: predictionId,
+        current_analysis_id: currentAnalysis.id,
+        accuracy_score: comparisonResult.data.accuracyScore,
         outcomeDescription: comparisonResult.data.outcomeDescription,
         comparisonAnalysis: comparisonResult.data.comparisonAnalysis
       });
@@ -208,22 +208,25 @@ export class AnalysisManager {
     const startOfDay = `${date} 00:00:00`;
     const endOfDay = `${date} 23:59:59`;
 
-    const content = await db.query<ProcessedContent>(`
-      SELECT 
-        pc.*,
-        rf.title,
-        rf.published_at,
-        rf.source_id,
-        fs.type as source_type
-      FROM processed_content pc
-      JOIN raw_feeds rf ON pc.raw_feed_id = rf.id
-      JOIN feed_sources fs ON rf.source_id = fs.id
-      WHERE rf.published_at >= $1 
-      AND rf.published_at <= $2
-      AND pc.processed_text IS NOT NULL
-      AND pc.processed_text != 'Awaiting transcription'
-      ORDER BY rf.published_at DESC
-    `, [startOfDay, endOfDay]);
+    const { data: content, error } = await db.from('processed_content')
+      .select(`
+        *,
+        raw_feeds!inner (
+          title,
+          published_at,
+          source_id,
+          feed_sources!inner (
+            type
+          )
+        )
+      `)
+      .gte('raw_feeds.published_at', startOfDay)
+      .lte('raw_feeds.published_at', endOfDay)
+      .not('processed_text', 'is', null)
+      .neq('processed_text', 'Awaiting transcription')
+      .order('raw_feeds(published_at)', { ascending: false });
+      
+    if (error) throw error;
 
     return content;
   }
@@ -242,7 +245,7 @@ export class AnalysisManager {
       const delaySeconds = Math.max(0, Math.floor(delayMs / 1000));
 
       // Queue comparison job
-      await queue.enqueue('prediction_comparison', {
+      await queueService.enqueue('prediction_comparison', {
         predictionId: prediction.id,
         date: comparisonDate.toISOString().split('T')[0]
       }, 3, delaySeconds);
@@ -292,24 +295,13 @@ export class AnalysisManager {
 
     const today = new Date().toISOString().split('T')[0];
     
-    // Get predictions that are due for comparison
-    const duePredictions = await db.query<{
-      id: string;
-      created_at: Date;
-      time_horizon: string;
-    }>(`
-      SELECT p.id, p.created_at, p.time_horizon
-      FROM predictions p
-      LEFT JOIN prediction_comparisons pc ON p.id = pc.previous_prediction_id
-      WHERE pc.id IS NULL
-      AND (
-        (p.time_horizon = '1_week' AND p.created_at <= NOW() - INTERVAL '7 days') OR
-        (p.time_horizon = '1_month' AND p.created_at <= NOW() - INTERVAL '1 month') OR
-        (p.time_horizon = '3_months' AND p.created_at <= NOW() - INTERVAL '3 months') OR
-        (p.time_horizon = '6_months' AND p.created_at <= NOW() - INTERVAL '6 months') OR
-        (p.time_horizon = '1_year' AND p.created_at <= NOW() - INTERVAL '1 year')
-      )
-    `);
+    // Get predictions that are due for comparison - using RPC for complex query
+    const { data: duePredictions, error } = await db.rpc('get_due_predictions');
+    
+    if (error) {
+      analysisLogger.error('Failed to get due predictions', { error });
+      return;
+    }
 
     analysisLogger.info('Found due predictions', { 
       count: duePredictions.length 
@@ -317,7 +309,7 @@ export class AnalysisManager {
 
     // Queue comparison for each due prediction
     for (const prediction of duePredictions) {
-      await queue.enqueue('prediction_comparison', {
+      await queueService.enqueue('prediction_comparison', {
         predictionId: prediction.id,
         date: today
       }, 3);

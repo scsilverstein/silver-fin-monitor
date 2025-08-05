@@ -19,6 +19,7 @@ import { AnalysisPagination } from '@/components/analysis/AnalysisPagination';
 import { GenerateAnalysisModal } from '@/components/analysis/GenerateAnalysisModal';
 import { ModernCard, CardContent } from '@/components/ui/ModernCard';
 import { useNavigate } from 'react-router-dom';
+import { parseAnalysisDate } from '@/lib/utils';
 
 export const ModernAnalysis: React.FC = () => {
   const navigate = useNavigate();
@@ -107,7 +108,9 @@ export const ModernAnalysis: React.FC = () => {
     }),
     createStatItems.count('recent', 'This Week', 
       analyses.filter(a => {
-        const analysisDate = new Date(a.analysis_date);
+        const analysisDate = parseAnalysisDate(a);
+        if (!analysisDate) return false;
+        
         const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         return analysisDate > weekAgo;
       }).length, {

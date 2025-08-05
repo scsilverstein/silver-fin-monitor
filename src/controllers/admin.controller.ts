@@ -3,7 +3,7 @@ import { Request, Response } from 'express';
 import { authService } from '@/services/auth/supabase-auth';
 import { asyncHandler } from '@/middleware/error';
 import { createContextLogger } from '@/utils/logger';
-import db from '@/services/database';
+import { db } from '@/services/database/index';
 import { validateUUID } from '@/utils/validation';
 import { OpenAI } from 'openai';
 import { format, subDays } from 'date-fns';
@@ -434,7 +434,7 @@ export class AdminController {
         success: false,
         error: {
           code: 'CREATE_ADMIN_ERROR',
-          message: error.message || 'Failed to create admin user'
+          message: error instanceof Error ? error.message : 'Failed to create admin user'
         }
       });
     }
@@ -589,7 +589,7 @@ export class AdminController {
   getBackfillStatus = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
       // Get analysis coverage
-      const client = db.getClient();
+      const client = db;
       const { data: analyses } = await client
         .from('daily_analysis')
         .select('analysis_date')
@@ -665,7 +665,7 @@ export class AdminController {
     adminLogger.info(`Generating analysis for ${dateStr}...`);
 
     // Check if analysis already exists
-    const client = db.getClient();
+    const client = db;
     const { data: existingAnalysis } = await client
       .from('daily_analysis')
       .select('id')
@@ -675,6 +675,25 @@ export class AdminController {
     if (existingAnalysis) {
       adminLogger.info(`Analysis already exists for ${dateStr}, skipping...`);
       return;
+    }
+
+    // Define the type for the joined query result
+    interface ProcessedContentWithRelations {
+      id: string;
+      summary: string;
+      key_topics: string[];
+      sentiment_score: number;
+      entities: any;
+      raw_feed_id: string;
+      raw_feeds: {
+        title: string;
+        published_at: string;
+        source_id: string;
+        feed_sources: {
+          name: string;
+          type: string;
+        };
+      };
     }
 
     // Fetch processed content for this date
@@ -709,8 +728,11 @@ export class AdminController {
 
     adminLogger.info(`Found ${content.length} content items for ${dateStr}`);
 
+    // Type assertion for TypeScript - convert to unknown first due to structure mismatch
+    const typedContent = content as unknown as ProcessedContentWithRelations[];
+
     // Prepare content for AI analysis
-    const contentSummary = content.map(item => ({
+    const contentSummary = typedContent.map(item => ({
       title: item.raw_feeds?.title,
       source: item.raw_feeds?.feed_sources?.name,
       summary: item.summary,
@@ -792,7 +814,7 @@ Format your response as JSON with the following structure:
     adminLogger.info(`Generating predictions for ${dateStr}...`);
     
     // Get the daily analysis ID
-    const client = db.getClient();
+    const client = db;
     const { data: dailyAnalysis } = await client
       .from('daily_analysis')
       .select('id')

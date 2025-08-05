@@ -97,7 +97,7 @@ export async function processFeed(sourceId: string): Promise<void> {
           title: item.title,
           description: item.description,
           content: item.content,
-          published_at: item.publishedAt,
+          published_at: item.publishedAt || item.pubDate || new Date().toISOString(),
           external_id: item.externalId,
           metadata: item.metadata,
           processing_status: 'pending'

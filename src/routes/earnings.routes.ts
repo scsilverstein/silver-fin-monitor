@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '@/services/database';
+import { db } from '@/services/database/index';
 import EarningsController from '@/controllers/earnings.controller';
 import { authenticateToken } from '@/middleware/auth';
 
@@ -112,6 +112,31 @@ const earningsController = new EarningsController(db);
 
   /**
    * @swagger
+   * /api/earnings/performance/{symbol}:
+   *   get:
+   *     summary: Get earnings performance statistics for a company
+   *     tags: [Earnings]
+   *     parameters:
+   *       - in: path
+   *         name: symbol
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: Stock symbol
+   *       - in: query
+   *         name: quarters
+   *         schema:
+   *           type: integer
+   *           default: 8
+   *         description: Number of quarters to analyze
+   *     responses:
+   *       200:
+   *         description: Earnings performance statistics
+   */
+  router.get('/performance/:symbol', earningsController.getEarningsPerformanceStats);
+
+  /**
+   * @swagger
    * /api/earnings/{symbol}/{date}:
    *   get:
    *     summary: Get comprehensive earnings data including reports
@@ -137,31 +162,6 @@ const earningsController = new EarningsController(db);
    *         description: Earnings data not found
    */
   router.get('/:symbol/:date', earningsController.getEarningsWithReports);
-
-  /**
-   * @swagger
-   * /api/earnings/performance/{symbol}:
-   *   get:
-   *     summary: Get earnings performance statistics for a company
-   *     tags: [Earnings]
-   *     parameters:
-   *       - in: path
-   *         name: symbol
-   *         required: true
-   *         schema:
-   *           type: string
-   *         description: Stock symbol
-   *       - in: query
-   *         name: quarters
-   *         schema:
-   *           type: integer
-   *           default: 8
-   *         description: Number of quarters to analyze
-   *     responses:
-   *       200:
-   *         description: Earnings performance statistics
-   */
-  router.get('/performance/:symbol', earningsController.getEarningsPerformanceStats);
 
   /**
    * @swagger

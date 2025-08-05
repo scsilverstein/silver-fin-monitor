@@ -1,8 +1,8 @@
 // Database-based cache service implementation following CLAUDE.md specification
-import { Cache, Result } from '@/types';
-import { db } from '@/services/database';
-import { createContextLogger } from '@/utils/logger';
-import config from '@/config';
+import { Cache, Result } from '../../types';
+import { db } from '../database';
+import { createContextLogger } from '../../utils/logger';
+import config from '../../config';
 
 const cacheLogger = createContextLogger('Cache');
 
@@ -18,7 +18,7 @@ export class DatabaseCacheService implements Cache {
       cacheLogger.debug('Cache get operation', { key });
       
       // Use the database function for cache retrieval
-      const result = await db.query<{ value: T }>('SELECT cache_get($1) as value', [key]);
+      const result = await db.query('SELECT cache_get($1) as value', [key]);
       
       if (!result || result.length === 0 || result[0]?.value === null) {
         cacheLogger.debug('Cache miss', { key });
@@ -26,7 +26,7 @@ export class DatabaseCacheService implements Cache {
       }
 
       cacheLogger.debug('Cache hit', { key });
-      return result[0]!.value;
+      return result[0].value as T;
     } catch (error) {
       // Silently handle database function not available errors
       if (error instanceof Error && error.message === 'DATABASE_FUNCTIONS_NOT_AVAILABLE') {
@@ -146,8 +146,8 @@ export class DatabaseCacheService implements Cache {
   }> {
     try {
       const [totalResult, expiredResult] = await Promise.all([
-        db.query<{ count: number }>('SELECT COUNT(*) as count FROM cache_store'),
-        db.query<{ count: number }>('SELECT COUNT(*) as count FROM cache_store WHERE expires_at < NOW()')
+        db.query('SELECT COUNT(*) as count FROM cache_store'),
+        db.query('SELECT COUNT(*) as count FROM cache_store WHERE expires_at < NOW()')
       ]);
 
       return {
@@ -166,8 +166,8 @@ export class DatabaseCacheService implements Cache {
     try {
       cacheLogger.debug('Cache cleanup operation');
       
-      const result = await db.query<{ count: number }>('SELECT cleanup_expired_data() as count');
-      const cleanedCount = result[0]?.count || 0;
+      const result = await db.query('SELECT cleanup_expired_data() as count');
+      const cleanedCount = (result[0] as any)?.count || 0;
       
       cacheLogger.info('Cache cleanup completed', { cleanedCount });
     } catch (error) {

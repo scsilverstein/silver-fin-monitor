@@ -5,8 +5,8 @@
   # Directory to change to before starting a build
   base = "/"
   
-  # Build command - use custom build script
-  command = "./scripts/netlify-build.sh"
+  # Build command - build Netlify function and frontend
+  command = "npx esbuild netlify/functions/api.ts --bundle --platform=node --outfile=netlify/functions/api.js && cd frontend && npm install && npm run build"
   
   # Directory that contains the deploy-ready files
   publish = "frontend/dist"
@@ -16,8 +16,18 @@
   
   # Port configuration for dev server
   [dev]
-    port = 9999
-    functionsPort = 8889
+    port = 8888
+    functionsPort = 8888
+    # Enable auto-rebuild for functions during development
+    autoLaunch = true
+    # Target directory for dev server (Vite dev server)
+    targetPort = 5173
+    # Auto-detect framework and start both frontend and functions
+    framework = "#auto"
+    # Enable live reload for functions
+    liveReload = true
+    # Force TypeScript compilation in dev mode
+    force = true
 
 # Development proxy configuration
 
@@ -36,18 +46,42 @@
     Referrer-Policy = "no-referrer"
     Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
 
-# Stock API proxy to test server
-[[redirects]]
-  from = "/api/v1/stocks/*"
-  to = "http://localhost:9999/api/v1/stocks/:splat"
-  status = 200
-  force = true
+# API routes - no caching for dynamic content
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate, private"
+    Pragma = "no-cache"
+    Expires = "0"
 
-# API proxy redirects
+# Static assets - no caching
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Pragma = "no-cache"
+    Expires = "0"
+    
+[[headers]]
+  for = "/*.css"  
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Pragma = "no-cache"
+    Expires = "0"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Pragma = "no-cache"
+    Expires = "0"
+
+# API proxy redirects - all API calls go to the serverless function
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
+  force = false
 
 # SPA redirect for React Router
 [[redirects]]
@@ -74,6 +108,15 @@
   
   # Node.js version for functions
   node_bundler = "esbuild"
+  
+  # esbuild configuration for TypeScript
+  [functions.esbuild]
+    # Target ES2020 for Node.js compatibility
+    target = "es2020"
+    # Enable TypeScript support
+    loader = { ".ts" = "ts" }
+    # External dependencies
+    external = ["aws-sdk"]
   
 # Plugins
 [[plugins]]

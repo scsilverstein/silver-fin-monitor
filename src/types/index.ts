@@ -213,6 +213,22 @@ export interface Database {
   update<T>(table: string, id: string, data: Partial<T>): Promise<T>;
   delete(table: string, id: string): Promise<void>;
   healthCheck(): Promise<Result<any>>;
+  getClient(): any; // Returns the underlying database client (SupabaseClient)
+  from(table: string): any; // Returns Supabase query builder
+  rpc(fnName: string, params?: Record<string, any>): any; // Returns RPC function call
+  tables: {
+    feedSources: any;
+    rawFeeds: any;
+    processedContent: any;
+    dailyAnalysis: any;
+    predictions: any;
+    entities: any;
+    stockData: any;
+    users: any;
+    alerts: any;
+    jobQueue: any;
+    cacheStore: any;
+  };
 }
 
 export interface Cache {
@@ -222,6 +238,7 @@ export interface Cache {
   clear(): Promise<void>;
   cleanup(): Promise<void>;
   healthCheck(): Promise<Result<any>>;
+  invalidateByTag(tag: string): Promise<void>;
 }
 
 export interface Queue {

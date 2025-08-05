@@ -1,6 +1,6 @@
 import { db } from '../services/database';
 import { OptionsScannerService } from '../services/options/options-scanner-service';
-import { QueueService } from '../services/queue.service';
+import QueueService from '../services/queue/queue.service';
 import { Logger } from '../utils/stock-logger';
 
 const logger = new Logger('SeedTechOptions');

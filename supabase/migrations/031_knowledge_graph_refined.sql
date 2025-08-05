@@ -50,7 +50,8 @@ INSERT INTO kg_entity_types (entity_type, entity_subtype, description) VALUES
     ('event', 'regulatory', 'Regulatory action or filing'),
     ('topic', 'industry', 'Industry classification'),
     ('topic', 'technology', 'Technology or innovation'),
-    ('topic', 'theme', 'Market theme or trend');
+    ('topic', 'theme', 'Market theme or trend')
+ON CONFLICT (entity_type) DO NOTHING;
 
 -- =====================================================
 -- PART 3: RELATIONSHIP TYPE DEFINITIONS
@@ -72,26 +73,26 @@ CREATE TABLE kg_relationship_types (
 -- Seed relationship types
 INSERT INTO kg_relationship_types (
     predicate, inverse_predicate, relationship_category, 
-    subject_types, object_types, description
+    subject_types, object_types, description, is_symmetric, is_transitive
 ) VALUES
     ('employs', 'employed_by', 'employment', 
-     ARRAY['organization'], ARRAY['person'], 'Organization employs person'),
+     ARRAY['organization'], ARRAY['person'], 'Organization employs person', false, false),
     ('owns', 'owned_by', 'ownership', 
-     ARRAY['organization', 'person'], ARRAY['security', 'organization'], 'Entity owns another entity'),
+     ARRAY['organization', 'person'], ARRAY['security', 'organization'], 'Entity owns another entity', false, false),
     ('located_in', 'location_of', 'location', 
-     ARRAY['organization', 'person', 'event'], ARRAY['place'], 'Entity is located in place'),
+     ARRAY['organization', 'person', 'event'], ARRAY['place'], 'Entity is located in place', false, false),
     ('competes_with', 'competes_with', 'competition', 
      ARRAY['organization'], ARRAY['organization'], 'Organizations compete', true, false),
     ('supplies', 'supplied_by', 'supply_chain', 
-     ARRAY['organization'], ARRAY['organization'], 'Supplier relationship'),
+     ARRAY['organization'], ARRAY['organization'], 'Supplier relationship', false, false),
     ('regulates', 'regulated_by', 'regulatory', 
-     ARRAY['organization'], ARRAY['organization', 'security'], 'Regulatory oversight'),
+     ARRAY['organization'], ARRAY['organization', 'security'], 'Regulatory oversight', false, false),
     ('invests_in', 'invested_by', 'investment', 
-     ARRAY['person', 'organization'], ARRAY['security', 'organization'], 'Investment relationship'),
+     ARRAY['person', 'organization'], ARRAY['security', 'organization'], 'Investment relationship', false, false),
     ('advises', 'advised_by', 'advisory', 
-     ARRAY['person', 'organization'], ARRAY['organization', 'person'], 'Advisory relationship'),
+     ARRAY['person', 'organization'], ARRAY['organization', 'person'], 'Advisory relationship', false, false),
     ('covers', 'covered_by', 'coverage', 
-     ARRAY['person'], ARRAY['security', 'organization'], 'Analyst coverage'),
+     ARRAY['person'], ARRAY['security', 'organization'], 'Analyst coverage', false, false),
     ('subsidiary_of', 'parent_of', 'corporate_structure', 
      ARRAY['organization'], ARRAY['organization'], 'Subsidiary relationship', false, true);
 
@@ -186,9 +187,7 @@ CREATE TABLE kg_relationships (
     -- Temporal validity with better constraints
     valid_from DATE DEFAULT CURRENT_DATE,
     valid_to DATE,
-    is_current BOOLEAN GENERATED ALWAYS AS (
-        valid_to IS NULL OR valid_to >= CURRENT_DATE
-    ) STORED,
+    is_current BOOLEAN DEFAULT true,
     
     -- Relationship metadata
     properties JSONB DEFAULT '{}', -- Type-specific properties
@@ -212,13 +211,7 @@ CREATE TABLE kg_relationships (
     -- Constraints
     CONSTRAINT no_self_relationship CHECK (subject_id != object_id),
     CONSTRAINT valid_date_range CHECK (valid_to IS NULL OR valid_from <= valid_to),
-    CONSTRAINT unique_current_relationship 
-        EXCLUDE USING gist (
-            subject_id WITH =,
-            predicate WITH =,
-            object_id WITH =,
-            daterange(valid_from, valid_to) WITH &&
-        )
+    UNIQUE(subject_id, predicate, object_id)
 );
 
 -- =====================================================
@@ -244,9 +237,7 @@ CREATE TABLE kg_entity_attributes (
     -- Temporal validity
     valid_from DATE DEFAULT CURRENT_DATE,
     valid_to DATE,
-    is_current BOOLEAN GENERATED ALWAYS AS (
-        valid_to IS NULL OR valid_to >= CURRENT_DATE
-    ) STORED,
+    is_current BOOLEAN DEFAULT true,
     
     -- Metadata
     unit VARCHAR(50), -- 'USD', 'percent', 'millions'
@@ -269,13 +260,7 @@ CREATE TABLE kg_entity_attributes (
         (attribute_type = 'date' AND value_date IS NOT NULL) OR
         (attribute_type = 'json' AND value_json IS NOT NULL)
     ),
-    CONSTRAINT unique_current_attribute 
-        EXCLUDE USING gist (
-            entity_id WITH =,
-            attribute_category WITH =,
-            attribute_name WITH =,
-            daterange(valid_from, valid_to) WITH &&
-        )
+    UNIQUE(entity_id, attribute_category, attribute_name)
 );
 
 -- =====================================================

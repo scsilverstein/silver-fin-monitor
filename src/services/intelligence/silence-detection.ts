@@ -181,7 +181,6 @@ class SilenceDetectionService {
     // Sort by mention count and return top entities
     const sortedEntities = Array.from(entityCounts.entries())
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 50) // Only analyze top 50 entities
       .map(([entity]) => entity);
 
     // Always include high-impact entities if they exist

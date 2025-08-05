@@ -2,6 +2,9 @@
 -- This migration improves the entire database schema for Silver Fin Monitor
 -- Run AFTER completing the unified stock system migration (020-021)
 
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- =====================================================
 -- PART 1: COMPLETE MIGRATION CLEANUP
 -- =====================================================
@@ -168,7 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_earnings_events_upcoming_confirmed
     WHERE has_reported = false AND is_confirmed = true;
 CREATE INDEX IF NOT EXISTS idx_options_chains_active_liquid 
     ON options_chains(entity_id, expiration) 
-    WHERE is_active = true AND expiration > CURRENT_DATE;
+    WHERE is_active = true;
 
 -- Text search indexes
 CREATE INDEX IF NOT EXISTS idx_processed_content_search 
@@ -568,24 +571,26 @@ ANALYZE options_quotes;
 ANALYZE daily_analytics;
 ANALYZE scanner_results;
 
--- Set up automated maintenance
-SELECT cron.schedule(
-    'refresh-materialized-views',
-    '0 */4 * * *', -- Every 4 hours
-    $$SELECT refresh_all_materialized_views()$$
-);
+-- Automated maintenance (requires pg_cron extension)
+-- Uncomment when pg_cron is available:
 
-SELECT cron.schedule(
-    'cleanup-old-data',
-    '0 2 * * *', -- Daily at 2 AM
-    $$SELECT cleanup_old_data()$$
-);
+-- SELECT cron.schedule(
+--     'refresh-materialized-views',
+--     '0 */4 * * *', -- Every 4 hours
+--     $$SELECT refresh_all_materialized_views()$$
+-- );
 
-SELECT cron.schedule(
-    'capture-health-metrics',
-    '0 0 * * *', -- Daily at midnight
-    $$SELECT capture_system_health_metrics()$$
-);
+-- SELECT cron.schedule(
+--     'cleanup-old-data',
+--     '0 2 * * *', -- Daily at 2 AM
+--     $$SELECT cleanup_old_data()$$
+-- );
+
+-- SELECT cron.schedule(
+--     'capture-health-metrics',
+--     '0 0 * * *', -- Daily at midnight
+--     $$SELECT capture_system_health_metrics()$$
+-- );
 
 -- =====================================================
 -- COMMENTS FOR DOCUMENTATION

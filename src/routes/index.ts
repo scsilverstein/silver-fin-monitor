@@ -1,16 +1,10 @@
 // API routes following CLAUDE.md specification
 import { Router } from 'express';
-// import { authenticateToken, requireRole, optionalAuth, requireSubscription, checkUsageLimit, incrementUsage } from '@/middleware/auth';
-// import { validate, validateQuery, validateUUID, schemas, querySchemas } from '@/middleware/validation';
-// import { rateLimiters } from '@/middleware/rateLimit';
+import { authenticateToken, requireRole, optionalAuth, requireSubscription, checkUsageLimit, incrementUsage } from '../middleware/auth';
+// import { validate, validateQuery, validateUUID, schemas, querySchemas } from '../middleware/validation';
+// import { rateLimiters } from '../middleware/rateLimit';
 
-// Temporary middleware placeholders to prevent crashes
-const authenticateToken = (req: any, res: any, next: any) => next();
-const requireRole = (role: string) => (req: any, res: any, next: any) => next();
-const optionalAuth = (req: any, res: any, next: any) => next();
-const requireSubscription = (tier: string) => (req: any, res: any, next: any) => next();
-const checkUsageLimit = (limit: string) => (req: any, res: any, next: any) => next();
-const incrementUsage = (req: any, res: any, next: any) => next();
+// Temporary validation placeholders to prevent crashes
 const validate = (schema: any) => (req: any, res: any, next: any) => next();
 const validateQuery = (schema: any) => (req: any, res: any, next: any) => next();
 const validateUUID = (param: string) => (req: any, res: any, next: any) => next();
@@ -19,27 +13,35 @@ const querySchemas = {} as any;
 const rateLimiters = { read: (req: any, res: any, next: any) => next(), write: (req: any, res: any, next: any) => next(), expensive: (req: any, res: any, next: any) => next() };
 // import { queueService } from '@/services/database/queue';
 
-// Import controllers
-// import { feedController, testFeedsEndpoint } from '@/controllers/feeds.controller';
-// import { contentController } from '@/controllers/content.controller';
-// import { analysisController } from '@/controllers/analysis.controller';
-// import { queueController } from '@/controllers/queue.controller';
-import { authController } from '@/controllers/auth.controller';
-// import { whisperController } from '@/controllers/whisper.controller';
-// import { entityAnalyticsController } from '@/controllers/entity-analytics.controller';
-// import { entityAnalyticsController } from '@/controllers/entity-analytics-mock.controller';
-// import { subscriptionController } from '@/controllers/subscription.controller';
-// import { adminController } from '@/controllers/admin.controller';
-// import { transcriptionController } from '@/controllers/transcription.controller';
+// Import controllers - some are pre-instantiated singletons, others are classes
+import { authController } from '../controllers/auth.controller';
+import { feedController } from '../controllers/feeds.controller';
+import { contentController } from '../controllers/content.controller';
+import { queueController } from '../controllers/queue.controller';
+import { entityAnalyticsController } from '../controllers/entity-analytics.controller';
+import { subscriptionController } from '../controllers/subscription.controller';
+import { adminController } from '../controllers/admin.controller';
+import { transcriptionController } from '../controllers/transcription.controller';
+import { whisperController } from '../controllers/whisper.controller';
+import { analysisController } from '../controllers/analysis.controller';
+
+// Services are initialized within the controllers that need them
+// No need to initialize them here
+
+// Controllers are already instantiated as singletons in their respective files
+// No need to instantiate them here
+
+// Bind controller methods to preserve 'this' context (if needed)
+// Note: The singleton controllers already have their context bound
 
 // Import dashboard routes
-// import { dashboardRoutes } from './dashboard.routes';
-// import { insightsRoutes } from './insights.routes';
-// import { earningsRoutes } from './earnings.routes';
-// import intelligenceRoutes from './intelligence.routes';
-// import stockRoutes from './stock.routes';
-import stockScreenerRoutes from './stock-screener.routes';
-// import { createOptionsRoutes } from './options.routes';
+import { dashboardRoutes } from './dashboard.routes';
+import { insightsRoutes } from './insights.routes';
+import { earningsRoutes } from './earnings.routes';
+import intelligenceRoutes from './intelligence.routes';
+import stockRoutes from './stock.routes';
+import { createOptionsRoutes } from './options.routes';
+import analysisRoutes from './analysis.routes';
 
 const router = Router();
 
@@ -92,7 +94,7 @@ router.get('/debug/signal-divergence-data', async (req, res) => {
           sentiment: item.sentiment_score,
           created_at: item.created_at,
           raw_feeds: item.raw_feeds,
-          source_name: item.raw_feeds?.feed_sources?.name
+          source_name: item.raw_feeds?.[0]?.feed_sources?.[0]?.name
         })).slice(0, 3) || []
       }
     });
@@ -262,37 +264,290 @@ router.put('/auth/profile', authenticateToken, authController.updateProfile);
 router.put('/auth/password', authenticateToken, authController.changePassword);
 
 // Subscription routes (authenticated)
-// router.get('/subscription', authenticateToken, subscriptionController.getSubscription);
-// router.get('/subscription/usage', authenticateToken, subscriptionController.getUsage);
-// router.get('/subscription/plans', subscriptionController.getPlans);
-// router.post('/subscription/checkout', authenticateToken, subscriptionController.createCheckoutSession);
-// router.post('/subscription/cancel', authenticateToken, subscriptionController.cancelSubscription);
+router.get('/subscription', authenticateToken, subscriptionController.getSubscription);
+router.get('/subscription/usage', authenticateToken, subscriptionController.getUsage);
+router.get('/subscription/plans', subscriptionController.getPlans);
+router.post('/subscription/checkout', authenticateToken, subscriptionController.createCheckoutSession);
+router.post('/subscription/cancel', authenticateToken, subscriptionController.cancelSubscription);
 
 // API key management routes (Professional+ only)
-// router.post('/api-keys', authenticateToken, requireSubscription('professional'), subscriptionController.generateApiKey);
-// router.get('/api-keys', authenticateToken, requireSubscription('professional'), subscriptionController.listApiKeys);
-// router.delete('/api-keys/:keyId', authenticateToken, requireSubscription('professional'), subscriptionController.revokeApiKey);
+router.post('/api-keys', authenticateToken, requireSubscription('professional'), subscriptionController.generateApiKey);
+router.get('/api-keys', authenticateToken, requireSubscription('professional'), subscriptionController.listApiKeys);
+router.delete('/api-keys/:keyId', authenticateToken, requireSubscription('professional'), subscriptionController.revokeApiKey);
 
 // Stripe webhook (public)
-// router.post('/webhooks/stripe', subscriptionController.handleWebhook);
+router.post('/webhooks/stripe', subscriptionController.handleWebhook);
 
 // Dashboard routes
-// router.use('/dashboard', dashboardRoutes);
+router.use('/dashboard', dashboardRoutes);
 
 // Insights routes
-// router.use('/insights', insightsRoutes);
+router.use('/insights', insightsRoutes);
 
 // Earnings routes
-// router.use('/earnings', earningsRoutes);
+router.use('/earnings', earningsRoutes);
 
 // Intelligence routes
-// router.use('/intelligence', intelligenceRoutes);
+router.use('/intelligence', intelligenceRoutes);
+
+// Stock scanner routes (renamed from stock-screener)
+import stockScannerRoutes from './stock-scanner.routes';
 
 // Stock scanner routes
-// router.use('/stocks', stockRoutes);
+router.use('/stocks', stockScannerRoutes);
 
-// Stock screener routes (merged with stocks endpoint)
-router.use('/stocks', stockScreenerRoutes);
+// Analysis routes
+router.use('/analysis', analysisRoutes);
+
+// Queue routes (admin only)
+router.get(
+  '/queue/stats',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.read,
+  queueController.getQueueStats
+);
+
+router.get(
+  '/queue/status',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.read,
+  queueController.getQueueStatus
+);
+
+router.get(
+  '/queue/jobs',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.read,
+  queueController.listJobs
+);
+
+router.get(
+  '/queue/jobs/:id',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  rateLimiters.read,
+  queueController.getJob
+);
+
+router.post(
+  '/queue/jobs',
+  authenticateToken,
+  requireRole('admin'),
+  validate(schemas.enqueueJob),
+  rateLimiters.write,
+  queueController.enqueueJob
+);
+
+router.post(
+  '/queue/jobs/:id/retry',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  rateLimiters.write,
+  queueController.retryJob
+);
+
+router.post(
+  '/queue/jobs/:id/cancel',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  rateLimiters.write,
+  queueController.cancelJob
+);
+
+router.delete(
+  '/queue/jobs/:id',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  rateLimiters.write,
+  queueController.deleteJob
+);
+
+router.delete(
+  '/queue/jobs',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.clearJobs
+);
+
+router.post(
+  '/queue/clear/completed',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.clearCompleted
+);
+
+router.post(
+  '/queue/clear/failed',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.clearFailed
+);
+
+router.post(
+  '/queue/retry/failed',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.retryAllFailed
+);
+
+router.post(
+  '/queue/pause',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.pauseQueue
+);
+
+router.post(
+  '/queue/resume',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.resumeQueue
+);
+
+// ========================
+// Queue Worker Management Routes (Admin only)
+// ========================
+
+router.get(
+  '/queue/worker/status',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.read,
+  queueController.getWorkerStatus
+);
+
+router.post(
+  '/queue/worker/start',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.startWorker
+);
+
+router.post(
+  '/queue/worker/stop',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.stopWorker
+);
+
+router.post(
+  '/queue/worker/restart',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.write,
+  queueController.restartWorker
+);
+
+router.post(
+  '/queue/jobs/:id/reset',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  rateLimiters.write,
+  queueController.resetJob
+);
+
+// Feed routes
+router.get(
+  '/feeds',
+  authenticateToken,
+  rateLimiters.read,
+  feedController.listFeeds
+);
+
+router.get(
+  '/feeds/stats',
+  authenticateToken,
+  rateLimiters.read,
+  feedController.getFeedStats
+);
+
+// More specific route MUST come before less specific route
+router.get(
+  '/feeds/:id/items',
+  authenticateToken,
+  validateUUID('id'),
+  rateLimiters.read,
+  feedController.getFeedItems
+);
+
+router.get(
+  '/feeds/:id',
+  authenticateToken,
+  validateUUID('id'),
+  rateLimiters.read,
+  feedController.getFeed
+);
+
+router.post(
+  '/feeds',
+  authenticateToken,
+  requireRole('admin'),
+  validate(schemas.createFeedSource),
+  rateLimiters.write,
+  feedController.createFeed
+);
+
+router.put(
+  '/feeds/:id',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  validate(schemas.updateFeedSource),
+  rateLimiters.write,
+  feedController.updateFeed
+);
+
+router.delete(
+  '/feeds/:id',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  rateLimiters.write,
+  feedController.deleteFeed
+);
+
+router.post(
+  '/feeds/:id/process',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  rateLimiters.expensive,
+  feedController.processFeed
+);
+
+router.post(
+  '/feeds/:id/items/:itemId/process',
+  authenticateToken,
+  requireRole('admin'),
+  validateUUID('id'),
+  validateUUID('itemId'),
+  rateLimiters.expensive,
+  feedController.processFeedItem
+);
+
+router.post(
+  '/feeds/historical-backfill',
+  authenticateToken,
+  requireRole('admin'),
+  rateLimiters.expensive,
+  feedController.startHistoricalBackfill
+);
 
 // Debug endpoint to check loaded routes
 router.get('/debug/loaded-routes', (req, res) => {
@@ -326,22 +581,14 @@ router.get('/debug/loaded-routes', (req, res) => {
     success: true,
     totalRoutes: routes.length,
     routes: routes,
-    stockScreenerLoaded: !!stockScreenerRoutes
+    stockScreenerLoaded: !!stockScannerRoutes
   });
 });
 
-/* TEMPORARILY DISABLED - CONTROLLER IMPORTS NEED FIXING
+/* TEMPORARILY DISABLED - SECTIONS BELOW ARE DUPLICATES OR NEED FIXING
 // Options scanner routes - Pass queueService from server initialization
 // Note: This requires queueService to be available in the route setup
 // router.use('/options', createOptionsRoutes(queueService));
-
-// Feed routes with proper authentication and subscription tiers
-// router.get(
-//   '/feeds',
-//   authenticateToken,
-//   rateLimiters.read,
-//   feedController.listFeeds
-// );
 
 // Feed stats route (must come before :id routes)
 router.get(
@@ -715,48 +962,51 @@ router.post(
 );
 
 // ========================
-// Whisper Service Routes (Admin only)
+// Queue Worker Management Routes (Admin only)
 // ========================
 
 router.get(
-  '/services/whisper/status',
+  '/queue/worker/status',
   authenticateToken,
   requireRole('admin'),
   rateLimiters.read,
-  whisperController.getStatus
+  queueController.getWorkerStatus
 );
 
 router.post(
-  '/services/whisper/start',
+  '/queue/worker/start',
   authenticateToken,
   requireRole('admin'),
   rateLimiters.write,
-  whisperController.startService
+  queueController.startWorker
 );
 
 router.post(
-  '/services/whisper/stop',
+  '/queue/worker/stop',
   authenticateToken,
   requireRole('admin'),
   rateLimiters.write,
-  whisperController.stopService
+  queueController.stopWorker
 );
 
 router.post(
-  '/services/whisper/restart',
+  '/queue/worker/restart',
   authenticateToken,
   requireRole('admin'),
   rateLimiters.write,
-  whisperController.restartService
+  queueController.restartWorker
 );
 
-router.get(
-  '/services/whisper/queue',
+router.post(
+  '/queue/jobs/:id/reset',
   authenticateToken,
   requireRole('admin'),
-  rateLimiters.read,
-  whisperController.getTranscriptionQueue
+  validateUUID('id'),
+  rateLimiters.write,
+  queueController.resetJob
 );
+
+// NOTE: Whisper routes are commented out in the disabled section below
 
 // ========================
 // Transcription Routes (Admin only)

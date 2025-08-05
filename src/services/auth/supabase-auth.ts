@@ -1,6 +1,6 @@
 // Supabase Authentication Service for Silver Fin Monitor
 import { createClient, SupabaseClient, User as SupabaseUser } from '@supabase/supabase-js';
-import { config } from '@/config';
+import config from '@/config';
 import { User, CreateUserData, LoginData } from '@/types/auth';
 import { logger } from '@/utils/logger';
 import bcrypt from 'bcrypt';
@@ -309,7 +309,7 @@ export class SupabaseAuthService {
     try {
       const { error } = await this.supabase.auth
         .resetPasswordForEmail(email, {
-          redirectTo: `${config.frontend.url}/reset-password`
+          redirectTo: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password`
         });
 
       if (error) {
@@ -582,7 +582,8 @@ export class SupabaseAuthService {
           name: subscription.subscription_plans.name,
           slug: subscription.subscription_plans.slug,
           limits: subscription.subscription_plans.limits,
-          features: subscription.subscription_plans.features
+          features: subscription.subscription_plans.features,
+          priceMonthly: subscription.subscription_plans.price_monthly || 0
         } : undefined
       } : undefined
     };

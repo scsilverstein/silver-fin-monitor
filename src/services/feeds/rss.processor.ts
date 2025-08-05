@@ -1,7 +1,7 @@
 // RSS feed processor following CLAUDE.md specification
 import Parser from 'rss-parser';
 import axios from 'axios';
-import { FeedSource, RawFeed, ProcessedContent, Result, BaseFeedProcessorDeps } from '@/types';
+import { FeedSource, RawFeed, ProcessedContent, Result, BaseFeedProcessorDeps } from '../../types';
 import { BaseFeedProcessor } from './base.processor';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -136,7 +136,7 @@ export class RSSProcessor extends BaseFeedProcessor {
         processedText: processedText,
         keyTopics: keyTopics,
         summary,
-        entities: {}, // Will be populated by NLP service
+        entities: [], // Will be populated by NLP service
         processingMetadata: {
           processorVersion: '1.0.0',
           processingTime: Date.now(),

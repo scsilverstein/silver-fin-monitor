@@ -98,7 +98,7 @@ export const ModernFeeds: React.FC = () => {
       icon: <Database className="h-4 w-4" />,
       status: feeds.length > 0 ? 'success' : 'warning'
     }),
-    createStatItems.count('active', 'Active Feeds', feeds.filter(f => f.isActive).length, {
+    createStatItems.count('active', 'Active Feeds', feeds.filter(f => f.is_active).length, {
       icon: <Sparkles className="h-4 w-4" />,
       status: 'success'
     }),
@@ -271,8 +271,8 @@ export const ModernFeeds: React.FC = () => {
         subtitle="Manage your content feed sources and processing"
         badges={[
           { 
-            label: `${feeds.filter(f => f.isActive).length}/${feeds.length} Active`, 
-            variant: feeds.some(f => f.isActive) ? 'success' : 'outline' 
+            label: `${feeds.filter(f => f.is_active).length}/${feeds.length} Active`, 
+            variant: feeds.some(f => f.is_active) ? 'success' : 'outline' 
           },
           { 
             label: (() => {
@@ -349,7 +349,7 @@ export const ModernFeeds: React.FC = () => {
                 icon={feedTypeIcons[feed.type as keyof typeof feedTypeIcons] || feedTypeIcons.rss}
                 colorClass={feedTypeColors[feed.type as keyof typeof feedTypeColors] || feedTypeColors.rss}
                 onToggleExpand={() => toggleFeedExpanded(feed.id)}
-                onToggleActive={() => handleToggleFeedActive(feed.id, feed.isActive)}
+                onToggleActive={() => handleToggleFeedActive(feed.id, feed.is_active)}
                 onProcess={() => handleProcessFeed(feed.id)}
                 onDelete={() => handleDeleteFeed(feed.id)}
               >

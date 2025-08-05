@@ -1,32 +1,20 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
-  variant?: 'default' | 'bordered' | 'ghost';
-}
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {}
 
 export const Card = React.forwardRef<HTMLDivElement, CardProps>(
-  ({ className, variant = 'default', ...props }, ref) => {
-    const variants = {
-      default: 'bg-card text-card-foreground shadow-sm',
-      bordered: 'border bg-card text-card-foreground',
-      ghost: 'bg-transparent'
-    };
-
-    return (
-      <div
-        ref={ref}
-        className={cn(
-          'rounded-lg',
-          variants[variant],
-          className
-        )}
-        {...props}
-      />
-    );
-  }
+  ({ className, ...props }, ref) => (
+    <div
+      ref={ref}
+      className={cn(
+        'rounded-lg border bg-card text-card-foreground shadow-sm',
+        className
+      )}
+      {...props}
+    />
+  )
 );
-
 Card.displayName = 'Card';
 
 export const CardHeader = React.forwardRef<
@@ -39,7 +27,6 @@ export const CardHeader = React.forwardRef<
     {...props}
   />
 ));
-
 CardHeader.displayName = 'CardHeader';
 
 export const CardTitle = React.forwardRef<
@@ -55,7 +42,6 @@ export const CardTitle = React.forwardRef<
     {...props}
   />
 ));
-
 CardTitle.displayName = 'CardTitle';
 
 export const CardDescription = React.forwardRef<
@@ -68,7 +54,6 @@ export const CardDescription = React.forwardRef<
     {...props}
   />
 ));
-
 CardDescription.displayName = 'CardDescription';
 
 export const CardContent = React.forwardRef<
@@ -77,7 +62,6 @@ export const CardContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div ref={ref} className={cn('p-6 pt-0', className)} {...props} />
 ));
-
 CardContent.displayName = 'CardContent';
 
 export const CardFooter = React.forwardRef<
@@ -90,5 +74,4 @@ export const CardFooter = React.forwardRef<
     {...props}
   />
 ));
-
 CardFooter.displayName = 'CardFooter';

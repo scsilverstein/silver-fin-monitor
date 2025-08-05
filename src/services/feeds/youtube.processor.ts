@@ -1,7 +1,7 @@
 // YouTube feed processor following CLAUDE.md specification
 import axios from 'axios';
 import { parseStringPromise } from 'xml2js';
-import { FeedSource, RawFeed, ProcessedContent, Result, BaseFeedProcessorDeps } from '@/types';
+import { FeedSource, RawFeed, ProcessedContent, Result, BaseFeedProcessorDeps } from '../../types';
 import { BaseFeedProcessor } from './base.processor';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -133,7 +133,7 @@ export class YouTubeProcessor extends BaseFeedProcessor {
       // Check if needs transcription
       if (rawFeed.metadata?.needsTranscription && !rawFeed.metadata?.hasTranscript) {
         // Queue transcription job
-        const { queue } = await import('@/services/queue');
+        const { queue } = await import('../queue');
         await queue.enqueue('transcribe_video', {
           feedId: rawFeed.id,
           videoId: rawFeed.externalId
@@ -149,7 +149,7 @@ export class YouTubeProcessor extends BaseFeedProcessor {
           rawFeedId: rawFeed.id,
           processedText: 'Awaiting transcription',
           keyTopics: [],
-          entities: {},
+          entities: [],
           summary: 'Transcript pending',
           processingMetadata: {
             processorVersion: '1.0.0',
@@ -180,7 +180,7 @@ export class YouTubeProcessor extends BaseFeedProcessor {
         processedText: processedText,
         keyTopics: keyTopics,
         summary,
-        entities: {},
+        entities: [],
         processingMetadata: {
           processorVersion: '1.0.0',
           processingTime: Date.now(),

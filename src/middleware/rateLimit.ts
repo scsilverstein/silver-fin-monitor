@@ -38,7 +38,7 @@ export const createRateLimiter = (options: RateLimitOptions) => {
       // Check current request count
       const windowStart = new Date(Date.now() - windowMs);
       
-      const result = await db.query<{ count: number }>(
+      const result = await db.query(
         `SELECT COUNT(*) as count 
          FROM rate_limits 
          WHERE identifier = $1 
@@ -144,7 +144,7 @@ export const globalRateLimiter = async (
     
     // Use cache for performance
     const { cache } = await import('@/services/cache');
-    const current = await cache.get<number>(cacheKey) || 0;
+    const current = await cache.get(cacheKey) as number || 0;
     
     const limit = 1000; // 1000 requests per hour
     const window = 3600; // 1 hour in seconds

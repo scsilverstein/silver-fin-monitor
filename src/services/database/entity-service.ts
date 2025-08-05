@@ -1,11 +1,11 @@
-import { supabase } from '@/config/supabase';
-import { Database } from '@/types/supabase';
+import { db } from './index';
 
-type Entity = Database['public']['Tables']['entities']['Row'];
-type FundamentalMetrics = Database['public']['Tables']['fundamental_metrics']['Row'];
-type MarketDataDaily = Database['public']['Tables']['market_data_daily']['Row'];
-type DailyAnalytics = Database['public']['Tables']['daily_analytics']['Row'];
-type EarningsEvent = Database['public']['Tables']['earnings_events']['Row'];
+// Define types directly since Database might not have these properties
+type Entity = any;
+type FundamentalMetrics = any;
+type MarketDataDaily = any;
+type DailyAnalytics = any;
+type EarningsEvent = any;
 
 export interface EntityComplete {
   entity: Entity & {
@@ -25,7 +25,8 @@ export class EntityService {
   static async getEntityComplete(symbol: string): Promise<EntityComplete | null> {
     try {
       // Get entity with classification
-      const { data: entityData, error: entityError } = await supabase
+      const client = (db as any).getClient();
+      const { data: entityData, error: entityError } = await client
         .from('entities')
         .select(`
           *,
@@ -46,7 +47,7 @@ export class EntityService {
       if (!entityData) return null;
 
       // Get latest fundamental metrics
-      const { data: metrics } = await supabase
+      const { data: metrics } = await client
         .from('fundamental_metrics')
         .select('*')
         .eq('entity_id', entityData.id)
@@ -55,7 +56,7 @@ export class EntityService {
         .single();
 
       // Get latest market data
-      const { data: marketData } = await supabase
+      const { data: marketData } = await client
         .from('market_data_daily')
         .select('*')
         .eq('entity_id', entityData.id)
@@ -64,7 +65,7 @@ export class EntityService {
         .single();
 
       // Get latest analytics
-      const { data: analytics } = await supabase
+      const { data: analytics } = await client
         .from('daily_analytics')
         .select('*')
         .eq('entity_id', entityData.id)
@@ -73,7 +74,7 @@ export class EntityService {
         .single();
 
       // Get next earnings
-      const { data: nextEarnings } = await supabase
+      const { data: nextEarnings } = await client
         .from('earnings_events')
         .select('*')
         .eq('entity_id', entityData.id)
@@ -110,7 +111,8 @@ export class EntityService {
    * Get all active entities with basic information
    */
   static async getActiveEntities() {
-    const { data, error } = await supabase
+    const client = (db as any).getClient();
+    const { data, error } = await client
       .from('entities')
       .select(`
         id,
@@ -147,13 +149,13 @@ export class EntityService {
    * Search entities by symbol or name
    */
   static async searchEntities(query: string) {
-    const { data, error } = await supabase
+    const client = (db as any).getClient();
+    const { data, error } = await client
       .from('entities')
       .select('id, symbol, name, primary_exchange')
       .or(`symbol.ilike.%${query}%,name.ilike.%${query}%`)
       .eq('is_active', true)
-      .order('symbol')
-      .limit(20);
+      .order('symbol');
 
     if (error) throw error;
     return data || [];
@@ -163,7 +165,8 @@ export class EntityService {
    * Get entity by ID
    */
   static async getEntityById(id: string): Promise<Entity | null> {
-    const { data, error } = await supabase
+    const client = (db as any).getClient();
+    const { data, error } = await client
       .from('entities')
       .select('*')
       .eq('id', id)
@@ -177,7 +180,8 @@ export class EntityService {
    * Get entities by sector
    */
   static async getEntitiesBySector(sectorName: string) {
-    const { data, error } = await supabase
+    const client = (db as any).getClient();
+    const { data, error } = await client
       .from('entities')
       .select(`
         id,
@@ -209,8 +213,9 @@ export class EntityService {
    * Get peer entities for comparison
    */
   static async getPeerEntities(entityId: string) {
+    const client = (db as any).getClient();
     // First get the entity's industry
-    const { data: entityData } = await supabase
+    const { data: entityData } = await client
       .from('entity_classifications')
       .select('industry_id')
       .eq('entity_id', entityId)
@@ -220,7 +225,7 @@ export class EntityService {
     if (!entityData?.industry_id) return [];
 
     // Get other entities in the same industry
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('entities')
       .select(`
         id,
@@ -233,8 +238,7 @@ export class EntityService {
       .eq('is_active', true)
       .eq('entity_classifications.industry_id', entityData.industry_id)
       .neq('id', entityId)
-      .order('symbol')
-      .limit(20);
+      .order('symbol');
 
     if (error) throw error;
 

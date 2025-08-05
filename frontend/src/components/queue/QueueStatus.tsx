@@ -41,7 +41,7 @@ export const QueueStatus: React.FC<QueueStatusProps> = ({
           </ModernButton>
           
           <div className="text-sm text-muted-foreground">
-            Last updated: {new Date(status?.timestamp).toLocaleTimeString()}
+            Last updated: {status?.timestamp ? new Date(status.timestamp).toLocaleTimeString() : 'N/A'}
           </div>
         </div>
       </CardContent>

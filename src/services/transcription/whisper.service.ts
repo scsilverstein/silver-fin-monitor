@@ -68,7 +68,7 @@ export class WhisperTranscriptionService {
       // Check cache first
       if (feedId) {
         const cacheKey = `transcript:${feedId}`;
-        const cached = await cacheService.get<TranscriptionResult>(cacheKey);
+        const cached = await cacheService.get(cacheKey) as TranscriptionResult | null;
         if (cached) {
           logger.info('Using cached transcript', { feedId });
           return cached;

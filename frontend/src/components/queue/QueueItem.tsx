@@ -2,7 +2,7 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Trash2, RotateCcw, Play, Square, Clock, AlertCircle } from 'lucide-react';
+import { Trash2, RotateCcw, Play, Square, Clock, AlertCircle, RotateCw } from 'lucide-react';
 import { QueueJob } from '@/lib/api';
 import { QueueJobLink, SourceLink } from '@/components/navigation/ClickableLinks';
 import { formatDistanceToNow } from 'date-fns';
@@ -12,6 +12,7 @@ interface QueueItemProps {
   onDelete: (id: string) => void;
   onRetry: (id: string) => void;
   onCancel: (id: string) => void;
+  onReset?: (id: string) => void;
 }
 
 const StatusBadge: React.FC<{ status: QueueJob['status'] }> = ({ status }) => {
@@ -89,13 +90,26 @@ const PriorityBadge: React.FC<{ priority: number }> = ({ priority }) => {
   );
 };
 
-const QueueItem: React.FC<QueueItemProps> = ({ job, onDelete, onRetry, onCancel }) => {
-  const formatDate = (date: Date | string) => {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    return formatDistanceToNow(d, { addSuffix: true });
+const QueueItem: React.FC<QueueItemProps> = ({ job, onDelete, onRetry, onCancel, onReset }) => {
+  console.log('Full job object:', job); // Debug log
+  const formatDate = (date: Date | string | null | undefined) => {
+    if (!date) return 'N/A';
+    
+    try {
+      const d = typeof date === 'string' ? new Date(date) : date;
+      // Check if the date is valid
+      if (isNaN(d.getTime())) {
+        return 'Invalid date';
+      }
+      return formatDistanceToNow(d, { addSuffix: true });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Error';
+    }
   };
 
   const getJobTypeDisplayName = (jobType: string) => {
+    console.log('Job type received:', jobType); // Debug log
     if (!jobType) {
       return 'Unknown Job Type';
     }
@@ -119,6 +133,7 @@ const QueueItem: React.FC<QueueItemProps> = ({ job, onDelete, onRetry, onCancel 
   const canRetry = job.status === 'failed';
   const canCancel = job.status === 'pending' || job.status === 'retry';
   const canDelete = job.status === 'completed' || job.status === 'failed';
+  const canReset = job.status === 'failed' || job.status === 'completed';
 
   return (
     <Card className="mb-4">
@@ -144,8 +159,20 @@ const QueueItem: React.FC<QueueItemProps> = ({ job, onDelete, onRetry, onCancel 
                 variant="outline"
                 onClick={() => onRetry(job.id)}
                 className="h-7 px-2"
+                title="Retry job"
               >
                 <RotateCcw className="w-3 h-3" />
+              </Button>
+            )}
+            {canReset && onReset && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onReset(job.id)}
+                className="h-7 px-2 text-blue-600 hover:text-blue-700"
+                title="Reset job to pending"
+              >
+                <RotateCw className="w-3 h-3" />
               </Button>
             )}
             {canCancel && (
@@ -154,6 +181,7 @@ const QueueItem: React.FC<QueueItemProps> = ({ job, onDelete, onRetry, onCancel 
                 variant="outline"
                 onClick={() => onCancel(job.id)}
                 className="h-7 px-2 text-orange-600 hover:text-orange-700"
+                title="Cancel job"
               >
                 <Square className="w-3 h-3" />
               </Button>
@@ -164,6 +192,7 @@ const QueueItem: React.FC<QueueItemProps> = ({ job, onDelete, onRetry, onCancel 
                 variant="outline"
                 onClick={() => onDelete(job.id)}
                 className="h-7 px-2 text-red-600 hover:text-red-700"
+                title="Delete job"
               >
                 <Trash2 className="w-3 h-3" />
               </Button>

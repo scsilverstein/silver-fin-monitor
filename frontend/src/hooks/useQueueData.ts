@@ -16,7 +16,7 @@ export const useQueueData = (filters?: {
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [totalJobs, setTotalJobs] = useState(0);
-  const jobsPerPage = 20;
+  const jobsPerPage = 1000;
 
   // Auto-refresh
   const [autoRefresh, setAutoRefresh] = useState(true);

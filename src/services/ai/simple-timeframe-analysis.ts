@@ -1,7 +1,7 @@
-import { db } from '@/services/database';
+import { db } from '../database';
 import { OpenAI } from 'openai';
-import config from '@/config';
-import { createContextLogger } from '@/utils/logger';
+import config from '../../config';
+import { createContextLogger } from '../../utils/logger';
 import { createTimeframeAnalysisPrompt } from './enhanced-prompts';
 
 const logger = createContextLogger('SimpleTimeframeAnalysis');
@@ -102,7 +102,7 @@ export class SimpleTimeframeAnalysisService {
         end: bounds.end.toISOString()
       });
 
-      const client = db.getClient();
+      const client = (db as any).getClient();
       const { data, error } = await client
         .from('processed_content')
         .select(`
@@ -265,7 +265,7 @@ export class SimpleTimeframeAnalysisService {
       const bounds = this.calculateTimeframeBounds(type, referenceDate);
 
       // Check if analysis already exists
-      const client = db.getClient();
+      const client = (db as any).getClient();
       const { data: existingAnalysis } = await client
         .from('timeframe_analysis')
         .select('*')
@@ -397,7 +397,7 @@ export class SimpleTimeframeAnalysisService {
     endDate?: string;
   } = {}): Promise<{ data: TimeframeAnalysisData[]; total: number }> {
     try {
-      const client = db.getClient();
+      const client = (db as any).getClient();
       let query = client.from('timeframe_analysis').select('*', { count: 'exact' });
 
       if (options.type) {
@@ -443,7 +443,7 @@ export class SimpleTimeframeAnalysisService {
    */
   public async getTimeframeAnalysis(id: string): Promise<TimeframeAnalysisData | null> {
     try {
-      const client = db.getClient();
+      const client = (db as any).getClient();
       const { data, error } = await client
         .from('timeframe_analysis')
         .select('*')

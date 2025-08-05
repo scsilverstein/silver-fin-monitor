@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Database } from '@/types/database';
+import { Database } from '@/types';
 import { EarningsCalendarFilters } from '@/types/earnings';
 import SecEarningsService from '@/services/earnings/sec-earnings.service';
 import { logger } from '@/utils/logger';
@@ -10,8 +10,77 @@ export class EarningsController {
 
   constructor(db: Database) {
     this.db = db;
-    this.secEarningsService = new SecEarningsService(db);
+    this.secEarningsService = new SecEarningsService(db as any); // Type assertion to bypass type mismatch temporarily
   }
+
+  /**
+   * Get earnings calendar for a specific month
+   */
+  getEarningsCalendarMonth = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { year, month } = req.params;
+      
+      const yearNum = parseInt(year);
+      const monthNum = parseInt(month);
+      
+      // Validate year and month
+      if (isNaN(yearNum) || isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid year or month'
+        });
+        return;
+      }
+
+      // Get earnings data for the specified month using database helper methods  
+      const startDate = `${yearNum}-${monthNum.toString().padStart(2, '0')}-01`;
+      const endDate = new Date(yearNum, monthNum, 0); // Last day of month
+      const endDateStr = `${yearNum}-${monthNum.toString().padStart(2, '0')}-${endDate.getDate().toString().padStart(2, '0')}`;
+      
+      // Use findMany with date filtering
+      const earningsData = await this.db.findMany('earnings_calendar', {}, {
+        // We'll filter the results manually since complex date filtering might not work
+      });
+
+      // Filter and group by date
+      const calendarData: Record<string, any[]> = {};
+      
+      if (earningsData && Array.isArray(earningsData)) {
+        earningsData.forEach((row: any) => {
+          const earningDate = new Date(row.earnings_date);
+          const earningYear = earningDate.getFullYear();
+          const earningMonth = earningDate.getMonth() + 1;
+          
+          // Only include earnings for the requested month/year
+          if (earningYear === yearNum && earningMonth === monthNum) {
+            const dateStr = row.earnings_date;
+            if (!calendarData[dateStr]) {
+              calendarData[dateStr] = [];
+            }
+            calendarData[dateStr].push(row);
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        data: calendarData,
+        meta: {
+          year: yearNum,
+          month: monthNum,
+          totalDays: Object.keys(calendarData).length,
+          totalEarnings: Object.values(calendarData).reduce((sum, day) => sum + day.length, 0)
+        }
+      });
+    } catch (error) {
+      logger.error('Unexpected error in getEarningsCalendarMonth:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+
 
   /**
    * Get earnings calendar with optional filters
@@ -29,9 +98,8 @@ export class EarningsController {
         offset = 0
       } = req.query;
 
-      // Use Supabase client
-      const client = (this.db as any).getClient();
-      let query = client.from('earnings_calendar').select('*', { count: 'exact' });
+      // Use Supabase client via database interface
+      let query = this.db.from('earnings_calendar').select('*', { count: 'exact' });
 
       // Apply filters
       if (symbol) {
@@ -95,41 +163,75 @@ export class EarningsController {
   };
 
   /**
-   * Get upcoming earnings (next 30 days)
+   * Get upcoming earnings (uses direct query as fallback)
    */
   getUpcomingEarnings = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { days = 30 } = req.query;
+      const { days = '30' } = req.query;
+      
       const daysNum = parseInt(days as string);
+      
+      if (isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid days parameter. Must be between 1 and 365.'
+        });
+        return;
+      }
 
       // Calculate date range
       const today = new Date();
       const futureDate = new Date();
       futureDate.setDate(today.getDate() + daysNum);
+      
+      const todayStr = today.toISOString().split('T')[0];
+      const futureDateStr = futureDate.toISOString().split('T')[0];
 
-      // Use Supabase client
-      const client = (this.db as any).getClient();
-      const { data: earnings, error } = await client
+      // Use direct query since RPC functions may not be available
+      logger.info('Fetching upcoming earnings', { 
+        days: daysNum, 
+        dateRange: { start: todayStr, end: futureDateStr } 
+      });
+      
+      const queryResult = await this.db
         .from('earnings_calendar')
         .select('*')
-        .gte('earnings_date', today.toISOString().split('T')[0])
-        .lte('earnings_date', futureDate.toISOString().split('T')[0])
+        .gte('earnings_date', todayStr)
+        .lte('earnings_date', futureDateStr)
+        .eq('status', 'scheduled')
         .order('earnings_date', { ascending: true })
         .order('importance_rating', { ascending: false });
+        
+      const data = queryResult.data;
+      const error = queryResult.error;
 
       if (error) {
-        throw new Error(`Failed to fetch upcoming earnings: ${error.message}`);
+        logger.error('Error fetching upcoming earnings:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to fetch upcoming earnings'
+        });
+        return;
       }
 
       res.json({
         success: true,
-        data: earnings || []
+        data: data || [],
+        meta: {
+          days: daysNum,
+          count: data?.length || 0,
+          queryDate: new Date().toISOString(),
+          dateRange: {
+            start: todayStr,
+            end: futureDateStr
+          }
+        }
       });
     } catch (error) {
-      logger.error('Error getting upcoming earnings:', error);
+      logger.error('Unexpected error in getUpcomingEarnings:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get upcoming earnings'
+        error: 'Internal server error'
       });
     }
   };
@@ -149,16 +251,16 @@ export class EarningsController {
         return;
       }
 
-      // Use Supabase client
-      const client = (this.db as any).getClient();
-      
-      // Get earnings data
-      const { data: earnings, error: earningsError } = await client
+      // Get earnings data using database interface
+      const earningsResult = await this.db
         .from('earnings_calendar')
         .select('*')
         .eq('symbol', symbol.toUpperCase())
         .eq('earnings_date', date)
-        .single();
+        .limit(1);
+        
+      const earnings = earningsResult.data?.[0];
+      const earningsError = earningsResult.error;
 
       if (earningsError || !earnings) {
         res.status(404).json({
@@ -169,10 +271,13 @@ export class EarningsController {
       }
 
       // Get related reports
-      const { data: reports, error: reportsError } = await client
+      const reportsResult = await this.db
         .from('earnings_reports')
         .select('*')
         .eq('earnings_calendar_id', earnings.id);
+        
+      const reports = reportsResult.data;
+      const reportsError = reportsResult.error;
 
       const earningsData = {
         ...earnings,
@@ -208,16 +313,16 @@ export class EarningsController {
         return;
       }
 
-      // Use Supabase client
-      const client = (this.db as any).getClient();
-      
-      // Get historical earnings for the company
-      const { data: earnings, error } = await client
+      // Get historical earnings for the company using database interface
+      const queryResult = await this.db
         .from('earnings_calendar')
         .select('*')
         .eq('symbol', symbol.toUpperCase())
         .order('earnings_date', { ascending: false })
         .limit(parseInt(quarters as string));
+        
+      const earnings = queryResult.data;
+      const error = queryResult.error;
 
       if (error) {
         throw new Error(`Failed to fetch earnings stats: ${error.message}`);
@@ -266,15 +371,16 @@ export class EarningsController {
       // Limit to 10 tickers per request to avoid overwhelming the system
       const limitedTickers = tickers.slice(0, 10);
 
-      // Queue the refresh job
-      const client = (this.db as any).getClient();
-      const { error } = await client
-        .from('job_queue')
+      // Queue the refresh job using database interface
+      const refreshResult = await this.db
+        .from('job_queue')  
         .insert({
           job_type: 'earnings_refresh',
           payload: { tickers: limitedTickers },
           priority: 2
         });
+        
+      const error = refreshResult.error;
 
       if (error) {
         throw new Error(`Failed to queue refresh job: ${error.message}`);
@@ -294,78 +400,6 @@ export class EarningsController {
     }
   };
 
-  /**
-   * Get earnings calendar for a specific month (for calendar view)
-   */
-  getEarningsCalendarMonth = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { year, month } = req.params;
-
-      if (!year || !month) {
-        res.status(400).json({
-          success: false,
-          error: 'Year and month are required'
-        });
-        return;
-      }
-
-      const startDate = `${year}-${month.padStart(2, '0')}-01`;
-      // Get last day of the month (month is 1-based, but Date constructor uses 0-based)
-      const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
-      const endDate = `${year}-${month.padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
-
-      // Use Supabase client to fetch earnings data
-      const client = (this.db as any).getClient();
-      const { data: earnings, error } = await client
-        .from('earnings_calendar')
-        .select('*')
-        .gte('earnings_date', startDate)
-        .lte('earnings_date', endDate)
-        .order('earnings_date', { ascending: true })
-        .order('importance_rating', { ascending: false })
-        .order('symbol', { ascending: true });
-
-      if (error) {
-        throw new Error(`Failed to fetch earnings data: ${error.message}`);
-      }
-
-      // Group by date
-      const calendarData = earnings.reduce((acc: any, item: any) => {
-        if (!acc[item.earnings_date]) {
-          acc[item.earnings_date] = [];
-        }
-        acc[item.earnings_date].push({
-          id: item.id,
-          symbol: item.symbol,
-          company_name: item.company_name,
-          earnings_date: item.earnings_date,
-          time_of_day: item.time_of_day,
-          importance_rating: item.importance_rating,
-          status: item.status,
-          confirmed: item.confirmed,
-          has_reports: false,
-          fiscal_quarter: item.fiscal_quarter,
-          fiscal_year: item.fiscal_year
-        });
-        return acc;
-      }, {});
-
-      res.json({
-        success: true,
-        data: {
-          year: parseInt(year),
-          month: parseInt(month),
-          calendar: calendarData
-        }
-      });
-    } catch (error) {
-      logger.error('Error getting earnings calendar month:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get earnings calendar month'
-      });
-    }
-  };
 
   /**
    * Setup earnings data (temporary endpoint)
@@ -374,8 +408,7 @@ export class EarningsController {
     try {
       console.log('Setting up earnings data...');
       
-      // Use Supabase client to insert data
-      const client = (this.db as any).getClient();
+      // Use Supabase client via database interface to insert data
       const earningsData = [
         // Tech Giants
         { symbol: 'AAPL', company_name: 'Apple Inc.', earnings_date: '2025-01-28', time_of_day: 'after_market', importance_rating: 5, status: 'scheduled', confirmed: true },
@@ -417,26 +450,29 @@ export class EarningsController {
         { symbol: 'GM', company_name: 'General Motors Company', earnings_date: '2025-01-28', time_of_day: 'before_market', importance_rating: 3, status: 'scheduled', confirmed: true }
       ];
 
-      // Insert using Supabase client
-      const { data: inserted, error } = await client
-        .from('earnings_calendar')
-        .insert(earningsData)
-        .select();
-      
-      if (error) {
-        throw new Error(`Failed to insert earnings data: ${error.message}`);
+      // Insert using database helper methods
+      const inserted = [];
+      for (const item of earningsData) {
+        try {
+          const result = await this.db.create('earnings_calendar', item);
+          inserted.push(result);
+        } catch (error) {
+          logger.warn(`Failed to insert earnings for ${item.symbol}:`, error);
+          // Continue with other records
+        }
       }
       
       res.json({
         success: true,
         message: 'Earnings data setup completed',
-        count: inserted.length
+        count: inserted.length,
+        attempted: earningsData.length
       });
     } catch (error) {
       logger.error('Error setting up earnings data:', error);
       res.status(500).json({
         success: false,
-        error: error.message || 'Failed to setup earnings data'
+        error: error instanceof Error ? error.message : 'Failed to setup earnings data'
       });
     }
   };
@@ -446,29 +482,23 @@ export class EarningsController {
    */
   debugEarningsData = async (req: Request, res: Response): Promise<void> => {
     try {
-      // Check total count using Supabase
-      const client = (this.db as any).getClient();
-      const { count: totalCount, error: countError } = await client
-        .from('earnings_calendar')
-        .select('*', { count: 'exact', head: true });
+      // Debug: Check what methods are available on this.db
+      logger.info('Database methods:', Object.getOwnPropertyNames(this.db));
+      logger.info('Database constructor:', this.db.constructor.name);
+      logger.info('Has from method:', typeof this.db.from);
+      logger.info('Has getClient method:', typeof this.db.getClient);
+      logger.info('Has findMany method:', typeof this.db.findMany);
+      logger.info('Has create method:', typeof this.db.create);
       
-      if (countError) {
-        throw new Error(`Failed to count earnings data: ${countError.message}`);
-      }
+      // Get all earnings data using database helper methods
+      const allEarnings = await this.db.findMany('earnings_calendar');
+      const totalCount = allEarnings ? allEarnings.length : 0;
       
-      // Check January 2025 data
-      const { data: janData, error: janError } = await client
-        .from('earnings_calendar')
-        .select('*')
-        .gte('earnings_date', '2025-01-01')
-        .lte('earnings_date', '2025-01-31')
-        .order('earnings_date', { ascending: true })
-        .order('importance_rating', { ascending: false })
-        .limit(10);
-      
-      if (janError) {
-        throw new Error(`Failed to fetch January data: ${janError.message}`);
-      }
+      // Filter January 2025 data manually
+      const janData = allEarnings ? allEarnings.filter((item: any) => {
+        const date = new Date(item.earnings_date);
+        return date.getFullYear() === 2025 && date.getMonth() === 0; // January is month 0
+      }).slice(0, 10) : [];
 
       res.json({
         success: true,
@@ -483,7 +513,7 @@ export class EarningsController {
       logger.error('Error in debug earnings data:', error);
       res.status(500).json({
         success: false,
-        error: error.message || 'Failed to debug earnings data'
+        error: error instanceof Error ? error.message : 'Failed to debug earnings data'
       });
     }
   };
@@ -503,14 +533,15 @@ export class EarningsController {
         return;
       }
 
-      const client = (this.db as any).getClient();
-      
-      // Get the earnings report
-      const { data: report, error: reportError } = await client
+      // Get the earnings report using database interface
+      const reportResult = await this.db
         .from('earnings_reports')
         .select('*')
         .eq('id', reportId)
-        .single();
+        .limit(1);
+        
+      const report = reportResult.data?.[0];
+      const reportError = reportResult.error;
 
       if (reportError || !report) {
         res.status(404).json({
@@ -521,11 +552,14 @@ export class EarningsController {
       }
 
       // Get the report sections
-      const { data: sections, error: sectionsError } = await client
+      const sectionsResult = await this.db
         .from('earnings_report_sections')
         .select('*')
         .eq('earnings_report_id', reportId)
         .order('section_order', { ascending: true });
+        
+      const sections = sectionsResult.data;
+      const sectionsError = sectionsResult.error;
 
       const reportData = {
         ...report,

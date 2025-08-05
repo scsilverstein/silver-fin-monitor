@@ -1,11 +1,11 @@
 import { Request, Response } from 'express';
-import { db } from '../services/database';
+import { db } from '../services/database/index';
 import { Logger } from '../utils/stock-logger';
 import { cache } from '../services/cache';
 import { OptionsScannerService } from '../services/options/options-scanner-service';
 import { OptionsAnalysisEngine, ScanCriteria } from '../services/options/options-analysis-engine';
 import { PolygonOptionsFetcher } from '../services/options/polygon-options-fetcher';
-import { QueueService } from '../services/queue.service';
+import { queueService } from '../services/database/queue';
 
 const logger = new Logger('OptionsController');
 
@@ -14,7 +14,7 @@ export class OptionsController {
   private analysisEngine: OptionsAnalysisEngine;
   private polygonFetcher: PolygonOptionsFetcher;
 
-  constructor(private queueService: QueueService) {
+  constructor() {
     this.scannerService = new OptionsScannerService(queueService);
     this.analysisEngine = new OptionsAnalysisEngine();
     this.polygonFetcher = new PolygonOptionsFetcher();

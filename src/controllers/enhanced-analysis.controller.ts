@@ -4,7 +4,7 @@
  */
 
 import { Request, Response } from 'express';
-import { db } from '@/services/database';
+import { db } from '@/services/database/index';
 import { logger } from '@/utils/logger';
 import { EnhancedAnalysisService } from '../services/ai/enhanced-analysis';
 import { ValidationSystem } from '../services/ai/validation-system';
@@ -26,8 +26,7 @@ export class EnhancedAnalysisController {
       });
 
       // 1. Get processed content for analysis
-      const client = db.getClient();
-      const { data: processedContent, error: contentError } = await client
+      const { data: processedContent, error: contentError } = await db
         .from('processed_content')
         .select(`
           *,
@@ -57,7 +56,7 @@ export class EnhancedAnalysisController {
         timeframe: '24 hours',
         sources: [...new Set(processedContent.map(item => 
           item.raw_feeds?.feed_sources?.name
-        ).filter(Boolean))],
+        ).filter(Boolean))] as string[],
         marketConditions: await this.detectMarketRegime()
       };
 
@@ -99,7 +98,7 @@ export class EnhancedAnalysisController {
       );
 
       // 8. Store enhanced analysis in database
-      const { data: storedAnalysis, error: storeError } = await client
+      const { data: storedAnalysis, error: storeError } = await db
         .from('daily_analysis')
         .insert({
           analysis_date: date,
@@ -167,13 +166,13 @@ export class EnhancedAnalysisController {
 
     } catch (error) {
       logger.error('Enhanced daily analysis failed', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : 'Unknown error' }]
       });
 
       res.status(500).json({
         success: false,
         error: 'Failed to generate enhanced analysis',
-        details: error.message
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
@@ -186,8 +185,7 @@ export class EnhancedAnalysisController {
       const { analysisId, timeHorizons = ['1_week', '1_month', '3_months'] } = req.body;
 
       // 1. Get the analysis
-      const client = db.getClient();
-      const { data: analysis, error: analysisError } = await client
+      const { data: analysis, error: analysisError } = await db
         .from('daily_analysis')
         .select('*')
         .eq('id', analysisId)
@@ -221,7 +219,7 @@ export class EnhancedAnalysisController {
         }
 
         // 5. Store prediction in database
-        const { data: storedPrediction, error: predictionError } = await client
+        const { data: storedPrediction, error: predictionError } = await db
           .from('predictions')
           .insert({
             daily_analysis_id: analysisId,
@@ -280,13 +278,13 @@ export class EnhancedAnalysisController {
 
     } catch (error) {
       logger.error('Ensemble prediction generation failed', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : 'Unknown error' }]
       });
 
       res.status(500).json({
         success: false,
         error: 'Failed to generate ensemble predictions',
-        details: error.message
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
@@ -299,8 +297,7 @@ export class EnhancedAnalysisController {
       const { predictionId, actualOutcome, evaluationNotes } = req.body;
 
       // 1. Get the original prediction
-      const client = db.getClient();
-      const { data: prediction, error: predictionError } = await client
+      const { data: prediction, error: predictionError } = await db
         .from('predictions')
         .select(`
           *,
@@ -325,7 +322,7 @@ export class EnhancedAnalysisController {
       );
 
       // 5. Store accuracy evaluation
-      const { data: storedEvaluation, error: evaluationError } = await client
+      const { data: storedEvaluation, error: evaluationError } = await db
         .from('prediction_accuracy')
         .insert({
           prediction_id: predictionId,
@@ -371,13 +368,13 @@ export class EnhancedAnalysisController {
 
     } catch (error) {
       logger.error('Prediction accuracy evaluation failed', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : 'Unknown error' }]
       });
 
       res.status(500).json({
         success: false,
         error: 'Failed to evaluate prediction accuracy',
-        details: error.message
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
@@ -390,8 +387,7 @@ export class EnhancedAnalysisController {
       const { startDate, endDate, limit = 10000 } = req.query;
 
       // Get quality metrics from recent analyses
-      const client = db.getClient();
-      const { data: qualityData, error } = await client
+      const { data: qualityData, error } = await db
         .from('meta_learning_insights')
         .select('*')
         .gte('created_at', startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
@@ -419,13 +415,13 @@ export class EnhancedAnalysisController {
 
     } catch (error) {
       logger.error('Failed to get quality metrics', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : 'Unknown error' }]
       });
 
       res.status(500).json({
         success: false,
         error: 'Failed to retrieve quality metrics',
-        details: error.message
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
@@ -436,8 +432,7 @@ export class EnhancedAnalysisController {
   async getMethodologyPerformance(req: Request, res: Response) {
     try {
       // Use the database function to get methodology performance
-      const client = db.getClient();
-      const { data: performance, error } = await client
+      const { data: performance, error } = await db
         .rpc('get_methodology_performance');
 
       if (error) throw error;
@@ -452,13 +447,13 @@ export class EnhancedAnalysisController {
 
     } catch (error) {
       logger.error('Failed to get methodology performance', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : 'Unknown error' }]
       });
 
       res.status(500).json({
         success: false,
         error: 'Failed to retrieve methodology performance',
-        details: error.message
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
@@ -467,11 +462,10 @@ export class EnhancedAnalysisController {
 
   private async detectMarketRegime(): Promise<'bullish' | 'bearish' | 'neutral' | 'volatile'> {
     try {
-      const client = db.getClient();
-      const { data: regimeData } = await client.rpc('detect_market_regime');
+      const { data: regimeData } = await db.rpc('detect_market_regime');
       return regimeData || 'neutral';
     } catch (error) {
-      logger.warn('Market regime detection failed', { metadata: [{ error: error.message }] });
+      logger.warn('Market regime detection failed', { metadata: [{ error: error instanceof Error ? error.message : 'Unknown error' }] });
       return 'neutral';
     }
   }
@@ -533,8 +527,7 @@ export class EnhancedAnalysisController {
 
   private async storeValidationResults(analysisId: string, validation: any): Promise<void> {
     try {
-      const client = db.getClient();
-      await client
+      await db
         .from('meta_learning_insights')
         .insert({
           accuracy_scores: { validation_quality: validation.qualityScore },
@@ -550,14 +543,13 @@ export class EnhancedAnalysisController {
         });
     } catch (error) {
       logger.error('Failed to store validation results', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : 'Unknown error' }]
       });
     }
   }
 
   private async getCurrentMarketState(): Promise<any> {
-    const client = db.getClient();
-    const { data: latestAnalysis } = await client
+    const { data: latestAnalysis } = await db
       .from('daily_analysis')
       .select('*')
       .order('analysis_date', { ascending: false })
@@ -583,8 +575,7 @@ export class EnhancedAnalysisController {
   private async updateMetaLearningInsights(evaluation: any): Promise<void> {
     // Store insights in meta-learning database for continuous improvement
     try {
-      const client = db.getClient();
-      await client
+      await db
         .from('meta_learning_insights')
         .insert({
           accuracy_scores: evaluation.accuracy_scores,
@@ -596,7 +587,7 @@ export class EnhancedAnalysisController {
         });
     } catch (error) {
       logger.error('Failed to update meta-learning insights', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : 'Unknown error' }]
       });
     }
   }

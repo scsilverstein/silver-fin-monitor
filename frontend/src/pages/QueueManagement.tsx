@@ -8,6 +8,7 @@ import { useQueueActions } from '@/hooks/useQueueActions';
 import { useQueueFilters } from '@/hooks/useQueueFilters';
 import { QueueList } from '@/components/queue/QueueList';
 import { QueueTabs } from '@/components/queue/QueueTabs';
+import { WorkerControls } from '@/components/queue/WorkerControls';
 
 const QueueManagement: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'tabs'>('list');
@@ -111,6 +112,9 @@ const QueueManagement: React.FC = () => {
 
       <StatsGrid stats={queueStats} columns={4} loading={queueData.loading} />
 
+      {/* Worker Controls */}
+      <WorkerControls />
+
       {/* View Mode Toggle */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -154,6 +158,7 @@ const QueueManagement: React.FC = () => {
           onJobDelete={actions.handleJobDelete}
           onJobRetry={actions.handleJobRetry}
           onJobCancel={actions.handleJobCancel}
+          onJobReset={actions.handleJobReset}
           onRetryAllFailed={actions.handleRetryAllFailed}
           onClearFailed={actions.handleClearFailed}
           onPageChange={queueData.setCurrentPage}
@@ -166,6 +171,7 @@ const QueueManagement: React.FC = () => {
           onJobDelete={actions.handleJobDelete}
           onJobRetry={actions.handleJobRetry}
           onJobCancel={actions.handleJobCancel}
+          onJobReset={actions.handleJobReset}
         />
       )}
     </PageContainer>

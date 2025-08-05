@@ -1,6 +1,6 @@
 // Entity Analytics Controller - provides entity tracking and trending analysis
 import { Request, Response, NextFunction } from 'express';
-import { db } from '@/services/database';
+import { db } from '@/services/database/index';
 
 interface EntityAnalytics {
   entityName: string;
@@ -165,22 +165,87 @@ class EntityAnalyticsController {
         }
       });
 
-      // Transform data for response
+      // Calculate trend scores based on recent activity
+      const recentCutoff = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000); // 2 days ago
+      const recentContent = contentWithEntities.filter((row: any) => 
+        new Date(row.created_at) > recentCutoff
+      );
+      
+      // Calculate recent mention counts for trend detection
+      const recentEntityCounts = new Map<string, number>();
+      recentContent.forEach((row: any) => {
+        const entities = row.entities;
+        if (Array.isArray(entities)) {
+          entities.forEach((entity: any) => {
+            if (entity?.name && entity?.type) {
+              const key = `${entity.name}:${entity.type}`;
+              recentEntityCounts.set(key, (recentEntityCounts.get(key) || 0) + 1);
+            }
+          });
+        } else if (entities && typeof entities === 'object') {
+          Object.entries(entities).forEach(([type, entityList]: [string, any]) => {
+            if (Array.isArray(entityList)) {
+              const entityType = type === 'companies' ? 'company' : 
+                              type === 'tickers' ? 'ticker' :
+                              type === 'people' ? 'person' :
+                              type === 'locations' ? 'location' : type;
+              
+              entityList.forEach((entityName: string) => {
+                if (entityName && entityName.length > 1) {
+                  const key = `${entityName}:${entityType}`;
+                  recentEntityCounts.set(key, (recentEntityCounts.get(key) || 0) + 1);
+                }
+              });
+            }
+          });
+        }
+      });
+
+      // Transform data for response with real trend calculations
       const dashboardData: EntityDashboardData = {
-        topEntities: topEntities.map((row: any) => ({
-          entityName: row.entity_name,
-          entityType: row.entity_type,
-          mentionCount: row.mention_count,
-          sentiment: row.avg_sentiment,
-          trendScore: Math.random() * 100 // Placeholder for now
-        })),
+        topEntities: topEntities.map((row: any) => {
+          const key = `${row.entity_name}:${row.entity_type}`;
+          const recentCount = recentEntityCounts.get(key) || 0;
+          const totalDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
+          const avgDailyMentions = row.mention_count / totalDays;
+          const recentDailyMentions = recentCount / 2; // last 2 days
+          
+          // Calculate trend score: higher if recent activity exceeds average
+          const trendScore = avgDailyMentions > 0 
+            ? Math.min(100, (recentDailyMentions / avgDailyMentions) * 50)
+            : 0;
+          
+          return {
+            entityName: row.entity_name,
+            entityType: row.entity_type,
+            mentionCount: row.mention_count,
+            sentiment: row.avg_sentiment,
+            trendScore: trendScore
+          };
+        }),
         entityTypes: entityTypeCounts,
         sentimentDistribution: sentimentCounts,
-        trendingEntities: topEntities.slice(0, 10).map((row: any) => ({
-          entityName: row.entity_name,
-          mentionCount: row.mention_count,
-          trendDirection: 'stable' as const // Placeholder for now
-        })),
+        trendingEntities: topEntities.slice(0, 10).map((row: any) => {
+          const key = `${row.entity_name}:${row.entity_type}`;
+          const recentCount = recentEntityCounts.get(key) || 0;
+          const totalDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
+          const avgDailyMentions = row.mention_count / totalDays;
+          const recentDailyMentions = recentCount / 2;
+          
+          // Determine trend direction based on recent vs average activity
+          let trendDirection: 'up' | 'down' | 'stable' = 'stable';
+          if (avgDailyMentions > 0) {
+            const ratio = recentDailyMentions / avgDailyMentions;
+            if (ratio > 1.2) trendDirection = 'up';
+            else if (ratio < 0.8) trendDirection = 'down';
+          }
+          
+          return {
+            entityName: row.entity_name,
+            mentionCount: row.mention_count,
+            trendDirection: trendDirection
+          };
+        }),
         timeRange: {
           start: startDate.toISOString(),
           end: endDate.toISOString()
@@ -289,12 +354,49 @@ class EntityAnalyticsController {
       }
 
       const entityData = result[0];
+      
+      // Calculate mention trend by comparing recent vs older mentions
+      const trendQuery = `
+        WITH entity_mentions AS (
+          SELECT 
+            DATE(created_at) as mention_date,
+            COUNT(*) as daily_mentions
+          FROM processed_content
+          WHERE (entities->'companies' @> $1::jsonb
+            OR entities->'tickers' @> $1::jsonb
+            OR entities->'people' @> $1::jsonb
+            OR entities->'locations' @> $1::jsonb)
+          AND created_at >= NOW() - INTERVAL '14 days'
+          GROUP BY DATE(created_at)
+        ),
+        trend_calc AS (
+          SELECT 
+            AVG(CASE WHEN mention_date >= CURRENT_DATE - INTERVAL '7 days' THEN daily_mentions ELSE NULL END) as recent_avg,
+            AVG(CASE WHEN mention_date < CURRENT_DATE - INTERVAL '7 days' THEN daily_mentions ELSE NULL END) as older_avg
+          FROM entity_mentions
+        )
+        SELECT 
+          recent_avg,
+          older_avg,
+          CASE 
+            WHEN recent_avg IS NULL OR older_avg IS NULL THEN 'stable'
+            WHEN recent_avg > older_avg * 1.2 THEN 'increasing'
+            WHEN recent_avg < older_avg * 0.8 THEN 'decreasing'
+            ELSE 'stable'
+          END as trend
+        FROM trend_calc
+      `;
+      
+      const entityNameJson = JSON.stringify([entityName]);
+      const trendResult = await this.db.query(trendQuery, [entityNameJson]);
+      const mentionTrend = trendResult[0]?.trend || 'stable';
+      
       const analytics: EntityAnalytics = {
         entityName: entityData.entity_name,
         entityType: entityData.entity_type,
         totalMentions: parseInt(entityData.total_mentions),
         averageSentiment: parseFloat(entityData.average_sentiment) || 0,
-        mentionTrend: 'stable', // Placeholder
+        mentionTrend: mentionTrend,
         lastMentionDate: entityData.last_mention,
         sources: entityData.sources || []
       };
@@ -663,29 +765,107 @@ class EntityAnalyticsController {
     }
   };
 
-  // Get entity insights (placeholder for now)
-  getEntityInsights = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  // Get entity insights based on real data analysis
+  getEntityInsights = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      // const { entityName } = req.params; // Unused for now in placeholder implementation
+      const { entityName } = req.params;
 
-      // This is a placeholder implementation
-      // In a real implementation, this would use AI to generate insights
-      const insights = [
-        {
-          type: 'trend',
-          title: 'Trending Analysis',
-          description: 'This entity has been mentioned more frequently in recent days',
-          confidence: 0.7,
-          timeframe: '7 days'
-        },
-        {
-          type: 'sentiment',
-          title: 'Sentiment Shift',
-          description: 'Overall sentiment appears stable with slight positive bias',
-          confidence: 0.6,
-          timeframe: '30 days'
+      // Get entity analytics data for insights generation
+      const analyticsQuery = `
+        WITH entity_data AS (
+          SELECT 
+            DATE(created_at) as date,
+            COUNT(*) as daily_mentions,
+            AVG(sentiment_score) as daily_sentiment,
+            COUNT(DISTINCT rf.source_id) as unique_sources
+          FROM processed_content pc
+          LEFT JOIN raw_feeds rf ON pc.raw_feed_id = rf.id
+          WHERE (entities->'companies' @> $1::jsonb
+            OR entities->'tickers' @> $1::jsonb
+            OR entities->'people' @> $1::jsonb
+            OR entities->'locations' @> $1::jsonb)
+          AND pc.created_at >= NOW() - INTERVAL '30 days'
+          GROUP BY DATE(created_at)
+          ORDER BY date DESC
+        ),
+        trend_analysis AS (
+          SELECT 
+            AVG(CASE WHEN date >= CURRENT_DATE - INTERVAL '7 days' THEN daily_mentions END) as recent_mentions,
+            AVG(CASE WHEN date < CURRENT_DATE - INTERVAL '7 days' THEN daily_mentions END) as older_mentions,
+            AVG(CASE WHEN date >= CURRENT_DATE - INTERVAL '7 days' THEN daily_sentiment END) as recent_sentiment,
+            AVG(CASE WHEN date < CURRENT_DATE - INTERVAL '7 days' THEN daily_sentiment END) as older_sentiment,
+            MAX(daily_mentions) as peak_mentions,
+            MIN(daily_mentions) as min_mentions
+          FROM entity_data
+        )
+        SELECT * FROM trend_analysis
+      `;
+
+      const entityNameJson = JSON.stringify([entityName]);
+      const [trendData] = await this.db.query(analyticsQuery, [entityNameJson]);
+
+      if (!trendData) {
+        res.json({
+          success: true,
+          data: []
+        });
+        return;
+      }
+
+      const insights = [];
+
+      // Generate trend insight
+      if (trendData.recent_mentions && trendData.older_mentions) {
+        const mentionChange = ((trendData.recent_mentions - trendData.older_mentions) / trendData.older_mentions) * 100;
+        if (Math.abs(mentionChange) > 20) {
+          insights.push({
+            type: 'trend',
+            title: mentionChange > 0 ? 'Increasing Attention' : 'Decreasing Attention',
+            description: `${entityName} has ${mentionChange > 0 ? 'increased' : 'decreased'} in mentions by ${Math.abs(mentionChange).toFixed(1)}% over the past week`,
+            confidence: Math.min(0.9, Math.abs(mentionChange) / 100),
+            timeframe: '7 days'
+          });
         }
-      ];
+      }
+
+      // Generate sentiment insight
+      if (trendData.recent_sentiment !== null && trendData.older_sentiment !== null) {
+        const sentimentChange = trendData.recent_sentiment - trendData.older_sentiment;
+        if (Math.abs(sentimentChange) > 0.1) {
+          insights.push({
+            type: 'sentiment',
+            title: sentimentChange > 0 ? 'Improving Sentiment' : 'Declining Sentiment',
+            description: `Market sentiment for ${entityName} has ${sentimentChange > 0 ? 'improved' : 'declined'} by ${Math.abs(sentimentChange * 100).toFixed(1)}% recently`,
+            confidence: Math.min(0.8, Math.abs(sentimentChange) * 5),
+            timeframe: '7 days'
+          });
+        }
+      }
+
+      // Generate volatility insight
+      if (trendData.peak_mentions && trendData.min_mentions && trendData.peak_mentions > 0) {
+        const volatility = (trendData.peak_mentions - trendData.min_mentions) / trendData.peak_mentions;
+        if (volatility > 0.5) {
+          insights.push({
+            type: 'volatility',
+            title: 'High Volatility Detected',
+            description: `${entityName} shows significant variation in daily mentions, indicating volatile market interest`,
+            confidence: Math.min(0.85, volatility),
+            timeframe: '30 days'
+          });
+        }
+      }
+
+      // If no specific insights, provide general insight
+      if (insights.length === 0) {
+        insights.push({
+          type: 'general',
+          title: 'Stable Activity',
+          description: `${entityName} shows consistent mention patterns with stable sentiment`,
+          confidence: 0.7,
+          timeframe: '30 days'
+        });
+      }
 
       res.json({
         success: true,

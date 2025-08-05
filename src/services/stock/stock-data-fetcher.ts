@@ -1,409 +1,376 @@
-import { db } from '../database';
-import { Logger } from '../../utils/stock-logger';
-import { CircuitBreaker } from '../circuit-breaker';
-import { RetryManager, RetryConfig } from '../retry-manager';
-import { cache } from '../cache';
-import { Result } from '../../types';
-
-const logger = new Logger('StockDataFetcher');
-
-// Types
-export interface StockSymbol {
-  id: string;
-  symbol: string;
-  name: string;
-  exchange?: string;
-  sector?: string;
-  industry?: string;
-  marketCapCategory?: string;
-  isActive: boolean;
-}
-
-export interface StockFundamentals {
-  symbolId: string;
-  dataDate: Date;
-  
-  // Earnings data
-  earningsPerShare?: number;
-  forwardEarningsPerShare?: number;
-  earningsGrowthRate?: number;
-  
-  // P/E ratios
-  peRatio?: number;
-  forwardPeRatio?: number;
-  pegRatio?: number;
-  
-  // Price and volume
-  price?: number;
-  volume?: number;
-  marketCap?: number;
-  
-  // Additional metrics
-  revenue?: number;
-  revenueGrowthRate?: number;
-  profitMargin?: number;
-  bookValuePerShare?: number;
-  priceToBook?: number;
-  roe?: number;
-}
+// Stock data fetcher service following CLAUDE.md specification
+import axios from 'axios';
+import { CircuitBreaker, CircuitState } from '../circuit-breaker/circuit-breaker';
+import winston from 'winston';
 
 export interface StockDataProvider {
   name: string;
+  priority: number;
+  isHealthy(): Promise<boolean>;
   fetchFundamentals(symbol: string): Promise<StockFundamentals>;
   fetchBulkFundamentals(symbols: string[]): Promise<Map<string, StockFundamentals>>;
-  isHealthy(): Promise<boolean>;
+}
+
+export interface StockFundamentals {
+  symbol: string;
+  date: Date;
+  price: number;
+  marketCap: number;
+  forwardPE?: number;
+  trailingPE?: number;
+  forwardEPS?: number;
+  trailingEPS?: number;
+  revenue?: number;
+  earnings?: number;
+  volume: number;
+  dayHigh: number;
+  dayLow: number;
+  fiftyTwoWeekHigh: number;
+  fiftyTwoWeekLow: number;
+  metadata?: any;
 }
 
 // Yahoo Finance Provider
-class YahooFinanceProvider implements StockDataProvider {
-  name = 'yahoo';
+export class YahooFinanceProvider implements StockDataProvider {
+  name = 'Yahoo Finance';
+  priority = 1;
   private circuitBreaker: CircuitBreaker;
-  private retryManager: RetryManager;
-  private retryConfig: RetryConfig = {
-    maxRetries: 3,
-    backoff: 'exponential',
-    delay: 1000,
-    maxDelay: 30000
-  };
-  
-  constructor() {
-    this.circuitBreaker = new CircuitBreaker({
-      name: 'yahoo_finance',
-      failureThreshold: 5,
-      resetTimeout: 60000, // 1 minute
-      monitoringPeriod: 300000 // 5 minutes
-    });
-    
-    this.retryManager = new RetryManager();
+  private baseUrl = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary';
+
+  constructor(private logger: winston.Logger) {
+    this.circuitBreaker = new CircuitBreaker(
+      'YahooFinanceProvider',
+      this.logger,
+      {
+        failureThreshold: 5,
+        resetTimeout: 60000, // 1 minute
+        monitoringPeriod: 120000 // 2 minutes
+      }
+    );
   }
-  
+
+  async isHealthy(): Promise<boolean> {
+    return this.circuitBreaker.getState() !== CircuitState.OPEN;
+  }
+
   async fetchFundamentals(symbol: string): Promise<StockFundamentals> {
     return this.circuitBreaker.execute(async () => {
-      return this.retryManager.executeWithRetry(async () => {
-        // Implementation would use Yahoo Finance API
-        // For now, returning mock data structure
-        const response = await this.makeApiCall(symbol);
-        return this.transformResponse(response);
-      }, this.retryConfig);
+      try {
+        const modules = [
+          'financialData',
+          'defaultKeyStatistics',
+          'price',
+          'summaryDetail',
+          'earnings'
+        ].join(',');
+
+        const response = await axios.get(this.baseUrl + `/${symbol}`, {
+          params: {
+            modules,
+            crumb: await this.getCrumb()
+          },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          },
+          timeout: 10000
+        });
+
+        const data = response.data.quoteSummary.result[0];
+        
+        return this.parseYahooData(symbol, data);
+      } catch (error) {
+        this.logger.error('Yahoo Finance fetch error', { symbol, error });
+        throw error;
+      }
     });
   }
-  
+
   async fetchBulkFundamentals(symbols: string[]): Promise<Map<string, StockFundamentals>> {
     const results = new Map<string, StockFundamentals>();
     
-    // Batch requests to avoid rate limiting
-    const batchSize = 20;
+    // Yahoo doesn't have a great bulk API, so we batch with rate limiting
+    const batchSize = 5;
+    const delay = 1000; // 1 second between batches
+
     for (let i = 0; i < symbols.length; i += batchSize) {
       const batch = symbols.slice(i, i + batchSize);
-      
-      const batchResults = await Promise.all(
-        batch.map(async (symbol) => {
-          try {
-            const data = await this.fetchFundamentals(symbol);
-            return { symbol, data };
-          } catch (error) {
-            logger.error(`Failed to fetch data for ${symbol}`, error);
-            return null;
-          }
-        })
+      const batchPromises = batch.map(symbol => 
+        this.fetchFundamentals(symbol)
+          .then(data => results.set(symbol, data))
+          .catch(error => {
+            this.logger.error(`Failed to fetch ${symbol}`, error);
+            // Store null for failed symbols to track them
+            results.set(symbol, null);
+            // Don't re-throw to allow other symbols in batch to complete
+          })
       );
+
+      await Promise.all(batchPromises);
       
-      batchResults
-        .filter(result => result !== null)
-        .forEach(({ symbol, data }) => results.set(symbol, data));
-      
-      // Rate limiting delay
       if (i + batchSize < symbols.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
-    
+
     return results;
   }
-  
-  private async makeApiCall(symbol: string): Promise<any> {
-    // This would be the actual API call
-    // Using mock for now
-    const mockData = {
-      symbol,
-      regularMarketPrice: 150.00,
-      regularMarketVolume: 10000000,
-      marketCap: 1000000000,
-      trailingPE: 25.5,
-      forwardPE: 22.3,
-      epsTrailingTwelveMonths: 5.88,
-      epsForward: 6.73,
-      bookValue: 45.23,
-      returnOnEquity: 0.235
-    };
-    
-    return mockData;
+
+  private async getCrumb(): Promise<string> {
+    // In a real implementation, this would fetch a valid crumb token
+    // For now, return a placeholder
+    return 'dummy-crumb';
   }
-  
-  private transformResponse(response: any): StockFundamentals {
+
+  private parseYahooData(symbol: string, data: any): StockFundamentals {
+    const price = data.price || {};
+    const financialData = data.financialData || {};
+    const defaultKeyStatistics = data.defaultKeyStatistics || {};
+    const summaryDetail = data.summaryDetail || {};
+
     return {
-      symbolId: '', // Will be set by the fetcher
-      dataDate: new Date(),
-      earningsPerShare: response.epsTrailingTwelveMonths,
-      forwardEarningsPerShare: response.epsForward,
-      peRatio: response.trailingPE,
-      forwardPeRatio: response.forwardPE,
-      price: response.regularMarketPrice,
-      volume: response.regularMarketVolume,
-      marketCap: response.marketCap,
-      bookValuePerShare: response.bookValue,
-      priceToBook: response.regularMarketPrice / response.bookValue,
-      roe: response.returnOnEquity
+      symbol,
+      date: new Date(),
+      price: price.regularMarketPrice?.raw || 0,
+      marketCap: price.marketCap?.raw || 0,
+      forwardPE: defaultKeyStatistics.forwardPE?.raw,
+      trailingPE: defaultKeyStatistics.trailingPE?.raw,
+      forwardEPS: defaultKeyStatistics.forwardEps?.raw,
+      trailingEPS: defaultKeyStatistics.trailingEps?.raw,
+      revenue: financialData.totalRevenue?.raw,
+      earnings: financialData.ebitda?.raw,
+      volume: price.regularMarketVolume?.raw || 0,
+      dayHigh: price.regularMarketDayHigh?.raw || 0,
+      dayLow: price.regularMarketDayLow?.raw || 0,
+      fiftyTwoWeekHigh: summaryDetail.fiftyTwoWeekHigh?.raw || 0,
+      fiftyTwoWeekLow: summaryDetail.fiftyTwoWeekLow?.raw || 0,
+      metadata: {
+        currency: price.currency,
+        exchange: price.exchangeName,
+        quoteType: price.quoteType
+      }
     };
-  }
-  
-  async isHealthy(): Promise<boolean> {
-    return !this.circuitBreaker.isOpen();
   }
 }
 
-// Alpha Vantage Provider (Alternative)
-class AlphaVantageProvider implements StockDataProvider {
-  name = 'alpha_vantage';
-  private apiKey: string;
+// Alpha Vantage Provider
+export class AlphaVantageProvider implements StockDataProvider {
+  name = 'Alpha Vantage';
+  priority = 2;
   private circuitBreaker: CircuitBreaker;
-  
-  constructor(apiKey: string) {
+  private baseUrl = 'https://www.alphavantage.co/query';
+  private apiKey: string;
+
+  constructor(private logger: winston.Logger, apiKey: string) {
     this.apiKey = apiKey;
-    this.circuitBreaker = new CircuitBreaker({
-      name: 'alpha_vantage',
-      failureThreshold: 3,
-      resetTimeout: 120000 // 2 minutes
-    });
+    this.circuitBreaker = new CircuitBreaker(
+      'AlphaVantageProvider',
+      this.logger,
+      {
+        failureThreshold: 3,
+        resetTimeout: 300000, // 5 minutes (API has strict rate limits)
+        monitoringPeriod: 600000 // 10 minutes
+      }
+    );
   }
-  
+
+  async isHealthy(): Promise<boolean> {
+    return this.circuitBreaker.getState() !== CircuitState.OPEN && !!this.apiKey;
+  }
+
   async fetchFundamentals(symbol: string): Promise<StockFundamentals> {
     return this.circuitBreaker.execute(async () => {
-      // Alpha Vantage API implementation
-      const response = await this.makeApiCall(symbol);
-      return this.transformResponse(response);
+      try {
+        // Fetch quote data
+        const quoteResponse = await axios.get(this.baseUrl, {
+          params: {
+            function: 'GLOBAL_QUOTE',
+            symbol,
+            apikey: this.apiKey
+          },
+          timeout: 10000
+        });
+
+        // Fetch overview data
+        const overviewResponse = await axios.get(this.baseUrl, {
+          params: {
+            function: 'OVERVIEW',
+            symbol,
+            apikey: this.apiKey
+          },
+          timeout: 10000
+        });
+
+        return this.parseAlphaVantageData(symbol, quoteResponse.data, overviewResponse.data);
+      } catch (error) {
+        this.logger.error('Alpha Vantage fetch error', { symbol, error });
+        throw error;
+      }
     });
   }
-  
+
   async fetchBulkFundamentals(symbols: string[]): Promise<Map<string, StockFundamentals>> {
     const results = new Map<string, StockFundamentals>();
     
-    // Alpha Vantage has strict rate limits (5 calls/minute for free tier)
+    // Alpha Vantage has very strict rate limits (5 calls/minute for free tier)
+    const delay = 12000; // 12 seconds between calls
+
     for (const symbol of symbols) {
       try {
         const data = await this.fetchFundamentals(symbol);
         results.set(symbol, data);
-        
-        // Rate limiting: 12 seconds between calls for free tier
-        await new Promise(resolve => setTimeout(resolve, 12000));
       } catch (error) {
-        logger.error(`Alpha Vantage failed for ${symbol}`, error);
+        this.logger.error(`Failed to fetch ${symbol}`, error);
+      }
+
+      if (symbols.indexOf(symbol) < symbols.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
-    
+
     return results;
   }
-  
-  private async makeApiCall(symbol: string): Promise<any> {
-    // Actual API implementation would go here
-    return {};
-  }
-  
-  private transformResponse(response: any): StockFundamentals {
-    // Transform Alpha Vantage response format
-    return {} as StockFundamentals;
-  }
-  
-  async isHealthy(): Promise<boolean> {
-    return !this.circuitBreaker.isOpen();
+
+  private parseAlphaVantageData(symbol: string, quoteData: any, overviewData: any): StockFundamentals {
+    const quote = quoteData['Global Quote'] || {};
+    const overview = overviewData || {};
+
+    return {
+      symbol,
+      date: new Date(),
+      price: parseFloat(quote['05. price']) || 0,
+      marketCap: parseFloat(overview.MarketCapitalization) || 0,
+      forwardPE: parseFloat(overview.ForwardPE) || undefined,
+      trailingPE: parseFloat(overview.TrailingPE) || undefined,
+      forwardEPS: parseFloat(overview.ForwardAnnualDividendYield) || undefined,
+      trailingEPS: parseFloat(overview.EPS) || undefined,
+      revenue: parseFloat(overview.RevenueTTM) || undefined,
+      earnings: parseFloat(overview.EBITDA) || undefined,
+      volume: parseInt(quote['06. volume']) || 0,
+      dayHigh: parseFloat(quote['03. high']) || 0,
+      dayLow: parseFloat(quote['04. low']) || 0,
+      fiftyTwoWeekHigh: parseFloat(overview['52WeekHigh']) || 0,
+      fiftyTwoWeekLow: parseFloat(overview['52WeekLow']) || 0,
+      metadata: {
+        currency: 'USD',
+        exchange: overview.Exchange,
+        sector: overview.Sector,
+        industry: overview.Industry
+      }
+    };
   }
 }
 
-// Main Stock Data Fetcher Service
+// Main Stock Data Fetcher with fallback
 export class StockDataFetcher {
-  private providers: StockDataProvider[];
-  private cacheService: typeof cache;
-  private primaryProvider!: StockDataProvider; // Using definite assignment assertion
-  
-  constructor(cacheService: typeof cache) {
-    this.cacheService = cacheService;
-    
-    // Initialize providers in priority order
-    this.providers = [
-      new YahooFinanceProvider(),
-      // Add Alpha Vantage if API key is available
-      ...(process.env.ALPHA_VANTAGE_API_KEY 
-        ? [new AlphaVantageProvider(process.env.ALPHA_VANTAGE_API_KEY)]
-        : [])
-    ];
-    
-    // Ensure we always have at least one provider
-    if (this.providers.length === 0) {
-      throw new Error('No stock data providers available');
-    }
-    
-    this.primaryProvider = this.providers[0] as StockDataProvider;
-  }
-  
-  async fetchAndStoreFundamentals(symbol: string): Promise<Result<StockFundamentals>> {
-    try {
-      // Check cache first
-      const cacheKey = `stock_fundamentals:${symbol}:${new Date().toISOString().split('T')[0]}`;
-      const cached = await this.cacheService.get<StockFundamentals>(cacheKey);
-      if (cached) {
-        return { success: true, data: cached };
-      }
-      
-      // Get symbol ID from database
-      const { data: symbolData, error: symbolError } = await db.getClient()
-        .from('stock_symbols')
-        .select('id')
-        .eq('symbol', symbol)
-        .single();
-      
-      if (symbolError || !symbolData) {
-        return { success: false, error: new Error(`Symbol ${symbol} not found`) };
-      }
-      
-      // Try primary provider first
-      let fundamentals: StockFundamentals | null = null;
-      let lastError: Error | null = null;
-      
-      for (const provider of this.providers) {
-        try {
-          if (await provider.isHealthy()) {
-            fundamentals = await provider.fetchFundamentals(symbol);
-            fundamentals.symbolId = symbolData.id;
-            
-            // Store in database
-            await this.storeFundamentals(fundamentals);
-            
-            // Cache the result
-            await this.cacheService.set(cacheKey, fundamentals, 3600); // 1 hour
-            
-            logger.info(`Successfully fetched ${symbol} using ${provider.name}`);
-            break;
-          }
-        } catch (error) {
-          lastError = error as Error;
-          logger.warn(`Provider ${provider.name} failed for ${symbol}`, error);
-        }
-      }
-      
-      if (!fundamentals) {
-        return { 
-          success: false, 
-          error: lastError || new Error('All providers failed') 
-        };
-      }
-      
-      return { success: true, data: fundamentals };
-      
-    } catch (error) {
-      logger.error('Failed to fetch fundamentals', error);
-      return { success: false, error: error as Error };
+  private providers: StockDataProvider[] = [];
+
+  constructor(
+    private logger: winston.Logger,
+    providers?: StockDataProvider[]
+  ) {
+    if (providers) {
+      this.providers = providers.sort((a, b) => a.priority - b.priority);
+    } else {
+      // Default providers
+      this.providers = [
+        new YahooFinanceProvider(logger),
+        // Only add Alpha Vantage if API key is available
+        ...(process.env.ALPHA_VANTAGE_API_KEY 
+          ? [new AlphaVantageProvider(logger, process.env.ALPHA_VANTAGE_API_KEY)]
+          : [])
+      ];
     }
   }
-  
-  async fetchBulkFundamentals(symbols: string[]): Promise<Map<string, Result<StockFundamentals>>> {
-    const results = new Map<string, Result<StockFundamentals>>();
-    
-    // Use the healthiest provider for bulk operations
-    const healthyProvider = await this.getHealthiestProvider();
-    if (!healthyProvider) {
-      symbols.forEach(symbol => {
-        results.set(symbol, { 
-          success: false, 
-          error: new Error('No healthy providers available') 
-        });
-      });
-      return results;
-    }
-    
-    try {
-      const bulkData = await healthyProvider.fetchBulkFundamentals(symbols);
-      
-      for (const symbol of symbols) {
-        const data = bulkData.get(symbol);
-        if (data) {
-          // Get symbol ID and store
-          const { data: symbolData } = await db.getClient()
-            .from('stock_symbols')
-            .select('id')
-            .eq('symbol', symbol)
-            .single();
-          
-          if (symbolData) {
-            data.symbolId = symbolData.id;
-            await this.storeFundamentals(data);
-            results.set(symbol, { success: true, data });
-          }
-        } else {
-          results.set(symbol, { 
-            success: false, 
-            error: new Error('No data returned') 
-          });
-        }
-      }
-    } catch (error) {
-      logger.error('Bulk fetch failed', error);
-      symbols.forEach(symbol => {
-        if (!results.has(symbol)) {
-          results.set(symbol, { success: false, error: error as Error });
-        }
-      });
-    }
-    
-    return results;
-  }
-  
-  private async storeFundamentals(data: StockFundamentals): Promise<void> {
-    const { error } = await db.getClient()
-      .from('stock_fundamentals')
-      .upsert({
-        symbol_id: data.symbolId,
-        data_date: data.dataDate,
-        earnings_per_share: data.earningsPerShare,
-        forward_earnings_per_share: data.forwardEarningsPerShare,
-        earnings_growth_rate: data.earningsGrowthRate,
-        pe_ratio: data.peRatio,
-        forward_pe_ratio: data.forwardPeRatio,
-        peg_ratio: data.pegRatio,
-        price: data.price,
-        volume: data.volume,
-        market_cap: data.marketCap,
-        revenue: data.revenue,
-        revenue_growth_rate: data.revenueGrowthRate,
-        profit_margin: data.profitMargin,
-        book_value_per_share: data.bookValuePerShare,
-        price_to_book: data.priceToBook,
-        roe: data.roe,
-        data_source: this.primaryProvider.name
-      }, {
-        onConflict: 'symbol_id,data_date,data_source'
-      });
-    
-    if (error) {
-      throw new Error(`Failed to store fundamentals: ${error.message}`);
-    }
-  }
-  
-  private async getHealthiestProvider(): Promise<StockDataProvider | null> {
+
+  async fetchWithFallback(symbol: string): Promise<StockFundamentals> {
+    const errors: Error[] = [];
+
     for (const provider of this.providers) {
       if (await provider.isHealthy()) {
-        return provider;
+        try {
+          this.logger.info(`Fetching ${symbol} from ${provider.name}`);
+          const data = await provider.fetchFundamentals(symbol);
+          
+          // Validate data
+          if (this.isValidFundamentals(data)) {
+            return data;
+          } else {
+            throw new Error('Invalid data received');
+          }
+        } catch (error) {
+          this.logger.warn(`Provider ${provider.name} failed for ${symbol}`, error);
+          errors.push(error as Error);
+        }
+      } else {
+        this.logger.warn(`Provider ${provider.name} is unhealthy, skipping`);
       }
     }
-    return null;
+
+    // All providers failed
+    throw new Error(`All providers failed for ${symbol}: ${errors.map(e => e.message).join(', ')}`);
   }
-  
-  async getProviderHealth(): Promise<Record<string, boolean>> {
-    const health: Record<string, boolean> = {};
+
+  async fetchBulkWithFallback(symbols: string[]): Promise<Map<string, StockFundamentals>> {
+    const results = new Map<string, StockFundamentals>();
+    const failedSymbols: string[] = [];
+
+    // Try bulk fetch with primary provider first
+    const primaryProvider = this.providers[0];
+    if (primaryProvider && await primaryProvider.isHealthy()) {
+      try {
+        const bulkResults = await primaryProvider.fetchBulkFundamentals(symbols);
+        bulkResults.forEach((data, symbol) => {
+          if (this.isValidFundamentals(data)) {
+            results.set(symbol, data);
+          } else {
+            failedSymbols.push(symbol);
+          }
+        });
+      } catch (error) {
+        this.logger.error('Bulk fetch failed, falling back to individual fetches', error);
+        failedSymbols.push(...symbols);
+      }
+    } else {
+      failedSymbols.push(...symbols);
+    }
+
+    // Fetch failed symbols individually with fallback
+    for (const symbol of failedSymbols) {
+      try {
+        const data = await this.fetchWithFallback(symbol);
+        results.set(symbol, data);
+      } catch (error) {
+        this.logger.error(`Failed to fetch ${symbol} with all providers`, error);
+      }
+    }
+
+    return results;
+  }
+
+  private isValidFundamentals(data: StockFundamentals): boolean {
+    return !!(
+      data &&
+      data.symbol &&
+      data.date &&
+      data.price > 0 &&
+      data.marketCap >= 0
+    );
+  }
+
+  // Get provider health status
+  async getProvidersHealth(): Promise<{ provider: string; healthy: boolean }[]> {
+    const health = [];
     
     for (const provider of this.providers) {
-      health[provider.name] = await provider.isHealthy();
+      health.push({
+        provider: provider.name,
+        healthy: await provider.isHealthy()
+      });
     }
-    
+
     return health;
   }
 }
+
+export default StockDataFetcher;

@@ -76,7 +76,7 @@ export const RecentPredictions: React.FC<RecentPredictionsProps> = ({
                 </span>
                 <span className="text-muted-foreground">•</span>
                 <span className="text-muted-foreground capitalize">
-                  {prediction.time_horizon.replace('_', ' ')}
+                  {prediction.time_horizon ? prediction.time_horizon.replace('_', ' ') : 'Unknown'}
                 </span>
               </div>
               <div className="w-full bg-muted rounded-full h-1.5">

@@ -2,32 +2,27 @@ import axios, { AxiosError } from 'axios';
 
 // Determine the API URL based on the environment
 const getApiUrl = () => {
-  // If explicitly set in environment, use that
+  // If explicitly set in environment, use that first
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL;
   }
   
-  // In development, use appropriate server
-  if (import.meta.env.DEV || window.location.port === '9999') {
-    // Temporary: Use test server for stock endpoints
-    if (window.location.pathname.includes('/stocks')) {
-      return 'http://localhost:9999/api/v1';
-    }
-    // Use backend server for other endpoints
-    return 'http://localhost:3001/api/v1';
+  // In development, use the Vite proxy
+  if (import.meta.env.DEV) {
+    return '/api/v1';
   }
   
-  // Check if we're on Netlify (production or preview)
+  // In production, check deployment environment
   if (window.location.hostname.includes('netlify.app') || window.location.hostname.includes('netlify.com')) {
     return '/api/v1';
   }
   
-  // In production build but not Netlify, use relative path
+  // Default production fallback
   if (import.meta.env.PROD) {
     return '/api/v1';
   }
   
-  // Default to local server
+  // Final fallback to local server
   return 'http://localhost:3001/api/v1';
 };
 
@@ -214,10 +209,14 @@ export interface FeedSource {
   name: string;
   type: 'rss' | 'podcast' | 'youtube' | 'api' | 'multi_source' | 'reddit';
   url: string;
-  isActive: boolean;
+  is_active: boolean;
   config: Record<string, any>;
-  lastProcessedAt?: Date;
-  createdAt: Date;
+  last_processed_at?: string;
+  created_at: string;
+  updated_at?: string;
+  primary_entities?: any[];
+  focus_sectors?: any[];
+  reliability_score?: number;
 }
 
 // Content API
@@ -510,13 +509,13 @@ const transformPrediction = (pred: any): Prediction => ({
 
 export const predictionsApi = {
   list: async (filters?: { timeHorizon?: string; type?: string }) => {
-    const response = await api.get<ApiResponse<any[]>>('/predictions', { params: filters });
+    const response = await api.get<ApiResponse<any[]>>('/analysis/predictions', { params: filters });
     const predictions = response.data.data || [];
     return predictions.map(transformPrediction);
   },
 
   accuracy: async () => {
-    const response = await api.get<ApiResponse<any>>('/predictions/accuracy');
+    const response = await api.get<ApiResponse<any>>('/analysis/accuracy');
     return response.data.data!;
   },
 
@@ -664,10 +663,11 @@ export interface QueueJob {
   attempts: number;
   maxAttempts: number;
   errorMessage?: string;
-  scheduledAt: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  createdAt: Date;
+  scheduledAt: string | Date;
+  startedAt?: string | Date;
+  completedAt?: string | Date;
+  createdAt: string | Date;
+  expiresAt?: string | Date;
 }
 
 export interface QueueStats {
@@ -689,7 +689,7 @@ export interface QueueStats {
 
 export interface QueueStatus {
   isProcessing: boolean;
-  timestamp: Date;
+  timestamp: string | Date;
 }
 
 export const queueApi = {
@@ -788,6 +788,38 @@ export const queueApi = {
   // Resume queue processing
   resumeQueue: async () => {
     const response = await api.post<ApiResponse<{ message: string }>>('/queue/resume');
+    return response.data.data!;
+  },
+
+  // Worker Management APIs
+  getWorkerStatus: async () => {
+    const response = await api.get<ApiResponse<{
+      isRunning: boolean;
+      concurrency: number;
+      activeJobs: number;
+      activeJobIds: string[];
+      workerCount: number;
+    }>>('/queue/worker/status');
+    return response.data.data!;
+  },
+
+  startWorker: async () => {
+    const response = await api.post<ApiResponse<{ message: string; status?: any }>>('/queue/worker/start');
+    return response.data.data!;
+  },
+
+  stopWorker: async () => {
+    const response = await api.post<ApiResponse<{ message: string; status?: any }>>('/queue/worker/stop');
+    return response.data.data!;
+  },
+
+  restartWorker: async () => {
+    const response = await api.post<ApiResponse<{ message: string; status?: any }>>('/queue/worker/restart');
+    return response.data.data!;
+  },
+
+  resetJob: async (id: string) => {
+    const response = await api.post<ApiResponse<{ message: string }>>(`/queue/jobs/${id}/reset`);
     return response.data.data!;
   }
 };

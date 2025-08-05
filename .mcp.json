@@ -6,6 +6,9 @@
         "@playwright/mcp@latest"
       ]
     },
+    "context7": {
+      "command": "https://mcp.context7.com/mcp"
+    },
     "supabase": {
         "command": "npx",
         "args": [
@@ -16,7 +19,24 @@
         "env": {
           "SUPABASE_ACCESS_TOKEN": "sbp_f8e1ee414d2a956a5ac7cce40c31028ce6ded751"
         }
-    }  
+    },
+    "claude-flow": {
+      "command": "npx",
+      "args": [
+        "claude-flow@alpha",
+        "mcp",
+        "start"
+      ],
+      "type": "stdio"
+    },
+    "ruv-swarm": {
+      "command": "npx",
+      "args": [
+        "ruv-swarm@latest",
+        "mcp",
+        "start"
+      ],
+      "type": "stdio"
+    }
   }
-  
 }

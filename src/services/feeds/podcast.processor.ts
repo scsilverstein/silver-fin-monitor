@@ -1,7 +1,7 @@
 // Podcast feed processor following CLAUDE.md specification
 import Parser from 'rss-parser';
 import axios from 'axios';
-import { FeedSource, RawFeed, ProcessedContent, Result, BaseFeedProcessorDeps } from '@/types';
+import { FeedSource, RawFeed, ProcessedContent, Result, BaseFeedProcessorDeps, ContentEntity } from '../../types';
 import { BaseFeedProcessor } from './base.processor';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -150,12 +150,12 @@ export class PodcastProcessor extends BaseFeedProcessor {
       // Check if needs transcription
       if (rawFeed.metadata?.needsTranscription && rawFeed.metadata?.audioUrl) {
         // Check if Whisper service is available
-        const { whisperService } = await import('@/services/transcription/whisper.service');
+        const { whisperService } = await import('../transcription/whisper.service');
         const whisperAvailable = await whisperService.isAvailable();
         
         if (whisperAvailable) {
           // Queue transcription job with Whisper
-          const { supabase } = await import('@/services/database/client');
+          const { supabase } = await import('../database/client');
           await supabase.rpc('enqueue_job', {
             job_type: 'transcribe_audio',
             payload: {
@@ -183,7 +183,7 @@ export class PodcastProcessor extends BaseFeedProcessor {
           rawFeedId: rawFeed.id,
           processedText: 'Awaiting transcription',
           keyTopics: [],
-          entities: {},
+          entities: [],
           summary: 'Transcript pending',
           processingMetadata: {
             processorVersion: '1.0.0',
@@ -207,9 +207,11 @@ export class PodcastProcessor extends BaseFeedProcessor {
       );
 
       // Extract guests if configured
-      const entities: any = {};
+      const entities: ContentEntity[] = [];
       if (this.source.config.extractGuests && rawFeed.metadata?.guests) {
-        entities.people = rawFeed.metadata.guests;
+        rawFeed.metadata.guests.forEach((guest: string) => {
+          entities.push({ name: guest, type: 'person' });
+        });
       }
 
       // Generate summary

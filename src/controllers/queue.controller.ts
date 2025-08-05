@@ -1,12 +1,12 @@
 // Queue management controller following CLAUDE.md specification
 import { Request, Response } from 'express';
 import { queueService } from '@/services/database/queue';
-import { db } from '@/services/database';
-import { cache, cacheKeys, cacheTtl } from '@/services/cache';
+import { db } from '@/services/database/index';
+import { cache, cacheKeys, cacheTtl } from '@/services/cache/index';
 import { QueueJob, ApiResponse } from '@/types';
-import { asyncHandler } from '@/middleware/error';
-import { NotFoundError } from '@/middleware/error';
+import { asyncHandler, NotFoundError } from '@/middleware/error';
 import { createContextLogger } from '@/utils/logger';
+import { queueWorker } from '@/services/workers/queue-worker';
 
 const queueLogger = createContextLogger('QueueController');
 
@@ -22,17 +22,17 @@ export class QueueController {
       attempts: row.attempts,
       maxAttempts: row.max_attempts,
       errorMessage: row.error_message || undefined,
-      scheduledAt: new Date(row.scheduled_at),
-      expiresAt: new Date(row.expires_at),
-      createdAt: new Date(row.created_at)
+      scheduledAt: row.scheduled_at, // Keep as string
+      expiresAt: row.expires_at, // Keep as string
+      createdAt: row.created_at // Keep as string
     };
 
     // Add optional fields only if they exist
     if (row.started_at) {
-      job.startedAt = new Date(row.started_at);
+      job.startedAt = row.started_at; // Keep as string
     }
     if (row.completed_at) {
-      job.completedAt = new Date(row.completed_at);
+      job.completedAt = row.completed_at; // Keep as string
     }
 
     return job;
@@ -170,7 +170,7 @@ export class QueueController {
           job_type: job.job_type,
           status: job.status,
           count: parseInt(job.count) || 0,
-          avg_duration: parseFloat(job.avg_duration) || 0
+          avg_duration: parseFloat(String(job.avg_duration)) || 0
         })),
         timestamp: new Date()
       };
@@ -668,36 +668,173 @@ export class QueueController {
     });
   });
 
-  // Pause queue processing
-  pauseQueue = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    queueLogger.info('Pausing queue processing');
+  // Get worker status
+  getWorkerStatus = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    queueLogger.debug('Getting worker status');
 
-    // This would typically pause the queue worker
-    // For now, we'll just acknowledge the request
-    // In a real implementation, this would communicate with the queue worker
+    const status = queueWorker.getStatus();
 
     res.json({
       success: true,
       data: {
-        message: 'Queue processing pause requested'
+        worker: status,
+        environment: {
+          concurrency: process.env.JOB_CONCURRENCY || '3',
+          nodeEnv: process.env.NODE_ENV || 'development'
+        }
       }
     });
   });
 
-  // Resume queue processing
-  resumeQueue = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    queueLogger.info('Resuming queue processing');
+  // Start queue worker
+  startWorker = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    queueLogger.info('Starting queue worker');
 
-    // This would typically resume the queue worker
-    // For now, we'll just acknowledge the request
-    // In a real implementation, this would communicate with the queue worker
+    try {
+      await queueWorker.start();
+      
+      res.json({
+        success: true,
+        data: {
+          message: 'Queue worker started successfully',
+          status: queueWorker.getStatus()
+        }
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      queueLogger.error('Failed to start worker', { error: errorMessage });
+      
+      res.status(500).json({
+        success: false,
+        error: `Failed to start queue worker: ${errorMessage}`
+      });
+    }
+  });
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Queue processing resume requested'
+  // Stop queue worker
+  stopWorker = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    queueLogger.info('Stopping queue worker');
+
+    try {
+      await queueWorker.stop();
+      
+      res.json({
+        success: true,
+        data: {
+          message: 'Queue worker stopped successfully',
+          status: queueWorker.getStatus()
+        }
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      queueLogger.error('Failed to stop worker', { error: errorMessage });
+      
+      res.status(500).json({
+        success: false,
+        error: `Failed to stop queue worker: ${errorMessage}`
+      });
+    }
+  });
+
+  // Restart queue worker
+  restartWorker = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    queueLogger.info('Restarting queue worker');
+
+    try {
+      // Stop first
+      await queueWorker.stop();
+      
+      // Wait a moment
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Start again
+      await queueWorker.start();
+      
+      res.json({
+        success: true,
+        data: {
+          message: 'Queue worker restarted successfully',
+          status: queueWorker.getStatus()
+        }
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      queueLogger.error('Failed to restart worker', { error: errorMessage });
+      
+      res.status(500).json({
+        success: false,
+        error: `Failed to restart queue worker: ${errorMessage}`
+      });
+    }
+  });
+
+  // Pause queue processing (legacy method - now stops worker)
+  pauseQueue = asyncHandler(async (req: Request, res: Response, next: any): Promise<void> => {
+    queueLogger.info('Pausing queue processing (stopping worker)');
+    return this.stopWorker(req, res, next);
+  });
+
+  // Resume queue processing (legacy method - now starts worker)
+  resumeQueue = asyncHandler(async (req: Request, res: Response, next: any): Promise<void> => {
+    queueLogger.info('Resuming queue processing (starting worker)');
+    return this.startWorker(req, res, next);
+  });
+
+  // Reset job (change status from failed/completed back to pending)
+  resetJob = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const { id } = req.params;
+    queueLogger.info('Resetting job', { jobId: id });
+
+    try {
+      // Update job status to pending and reset attempts
+      const { data, error } = await db.getClient()
+        .from('job_queue')
+        .update({
+          status: 'pending',
+          attempts: 0,
+          error_message: null,
+          started_at: null,
+          completed_at: null,
+          scheduled_at: new Date().toISOString()
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
       }
-    });
+
+      if (!data) {
+        throw new NotFoundError('Job not found');
+      }
+
+      // Clear cache
+      await cache.delete(cacheKeys.queueStats());
+
+      res.json({
+        success: true,
+        data: {
+          message: 'Job reset successfully',
+          job: this.transformDbRowToQueueJob(data)
+        }
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      queueLogger.error('Failed to reset job', { jobId: id, error: errorMessage });
+      
+      if (error instanceof NotFoundError) {
+        res.status(404).json({
+          success: false,
+          error: errorMessage
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: `Failed to reset job: ${errorMessage}`
+        });
+      }
+    }
   });
 }
 

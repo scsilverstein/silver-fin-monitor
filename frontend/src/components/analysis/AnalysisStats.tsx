@@ -2,6 +2,7 @@ import React from 'react';
 import { ModernCard, CardContent } from '@/components/ui/ModernCard';
 import { TrendingUp, FileText, Shield, Activity } from 'lucide-react';
 import { DailyAnalysis } from '@/lib/api';
+import { parseSafeDate } from '@/lib/utils';
 
 interface AnalysisStatsProps {
   analyses: DailyAnalysis[];
@@ -28,7 +29,11 @@ export const AnalysisStats: React.FC<AnalysisStatsProps> = ({ analyses }) => {
     }, {} as Record<string, number>);
 
     // Calculate recent trend (last 7 analyses)
-    const recentAnalyses = analyses.filter(a => a.createdAt > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const recentAnalyses = analyses.filter(a => {
+      const createdDate = parseSafeDate(a.createdAt);
+      return createdDate && createdDate > weekAgo;
+    });
     const bullishCount = recentAnalyses.filter(a => a.marketSentiment === 'bullish').length;
     const bearishCount = recentAnalyses.filter(a => a.marketSentiment === 'bearish').length;
     

@@ -24,6 +24,11 @@ export class SupabaseDatabase implements Database {
     );
   }
 
+  // Get Supabase client for advanced operations
+  getClient(): SupabaseClient {
+    return this.client;
+  }
+
   async connect(): Promise<void> {
     try {
       dbLogger.info('Attempting database connection', {
@@ -477,9 +482,80 @@ export class SupabaseDatabase implements Database {
     }
   }
 
-  // Get client for direct operations
-  getClient(): SupabaseClient {
-    return this.client;
+  // Add missing .from method for Supabase-style queries
+  from(table: string) {
+    return this.client.from(table);
+  }
+
+  // Add missing .rpc method for stored procedures
+  rpc(fnName: string, params?: Record<string, any>) {
+    return this.client.rpc(fnName, params);
+  }
+
+  // Table operations to match DatabaseService interface
+  tables = {
+    feedSources: this.createTableOperations('feed_sources'),
+    rawFeeds: this.createTableOperations('raw_feeds'),
+    processedContent: this.createTableOperations('processed_content'),
+    dailyAnalysis: this.createTableOperations('daily_analysis'),
+    predictions: this.createTableOperations('predictions'),
+    entities: this.createTableOperations('entities'),
+    stockData: this.createTableOperations('stock_data'),
+    users: this.createTableOperations('users'),
+    alerts: this.createTableOperations('alerts'),
+    jobQueue: this.createTableOperations('job_queue'),
+    cacheStore: this.createTableOperations('cache_store')
+  };
+
+  // Create standard CRUD operations for a table
+  private createTableOperations(tableName: string) {
+    return {
+      findMany: async (filter?: any, options?: any) => {
+        return this.findMany(tableName, filter, options);
+      },
+
+      findOne: async (filter: any) => {
+        const results = await this.findMany(tableName, filter, { limit: 1 });
+        return results[0] || null;
+      },
+
+      create: async (data: any) => {
+        return this.create(tableName, data);
+      },
+
+      createMany: async (data: any[]) => {
+        const results = [];
+        for (const item of data) {
+          results.push(await this.create(tableName, item));
+        }
+        return results;
+      },
+
+      update: async (id: string, data: any) => {
+        return this.update(tableName, id, data);
+      },
+
+      delete: async (id: string) => {
+        await this.delete(tableName, id);
+        return true;
+      },
+
+      count: async (filter?: any) => {
+        let query = this.client.from(tableName).select('*', { count: 'exact', head: true });
+        
+        if (filter) {
+          Object.entries(filter).forEach(([key, value]) => {
+            if (value !== undefined) {
+              query = query.eq(key, value);
+            }
+          });
+        }
+
+        const { count, error } = await query;
+        if (error) throw error;
+        return count || 0;
+      }
+    };
   }
 }
 

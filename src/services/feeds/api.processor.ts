@@ -1,6 +1,6 @@
 // API feed processor following CLAUDE.md specification
 import axios, { AxiosInstance } from 'axios';
-import { FeedSource, RawFeed, ProcessedContent, Result, BaseFeedProcessorDeps } from '@/types';
+import { FeedSource, RawFeed, ProcessedContent, Result, BaseFeedProcessorDeps, ContentEntity } from '../../types';
 import { BaseFeedProcessor } from './base.processor';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -396,8 +396,8 @@ export class APIProcessor extends BaseFeedProcessor {
     return Array.from(topics).slice(0, 10);
   }
 
-  private extractEntitiesFromMetadata(rawData: any): Record<string, any> {
-    const entities: Record<string, any> = {};
+  private extractEntitiesFromMetadata(rawData: any): ContentEntity[] {
+    const entities: ContentEntity[] = [];
 
     if (!rawData || typeof rawData !== 'object') {
       return entities;
@@ -405,18 +405,27 @@ export class APIProcessor extends BaseFeedProcessor {
 
     // Common entity field names
     const entityMappings = {
-      companies: ['company', 'companies', 'organization', 'org'],
-      people: ['person', 'people', 'author', 'speaker', 'analyst'],
-      locations: ['location', 'locations', 'region', 'country', 'city'],
-      tickers: ['ticker', 'tickers', 'symbol', 'symbols', 'stock']
+      company: ['company', 'companies', 'organization', 'org'],
+      person: ['person', 'people', 'author', 'speaker', 'analyst'],
+      location: ['location', 'locations', 'region', 'country', 'city'],
+      ticker: ['ticker', 'tickers', 'symbol', 'symbols', 'stock']
     };
 
     Object.entries(entityMappings).forEach(([entityType, fields]) => {
       fields.forEach(field => {
         if (rawData[field]) {
-          entities[entityType] = Array.isArray(rawData[field]) 
+          const values = Array.isArray(rawData[field]) 
             ? rawData[field] 
             : [rawData[field]];
+          
+          values.forEach(value => {
+            if (value && typeof value === 'string') {
+              entities.push({
+                name: value,
+                type: entityType
+              });
+            }
+          });
         }
       });
     });

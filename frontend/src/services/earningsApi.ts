@@ -16,8 +16,8 @@ export interface EarningsCalendarEntry {
   reporting_status: 'reported' | 'missed' | 'scheduled';
 }
 
-// Use the same API URL as the main API
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:9999/.netlify/functions/api/api/v1';
+// Use Netlify functions API endpoint directly
+const API_BASE_URL = 'http://localhost:8888/.netlify/functions/api';
 
 export const earningsApi = {
   async getEarningsCalendarMonth(year: number, month: number) {
@@ -26,15 +26,23 @@ export const earningsApi = {
       const result = await response.json();
       
       if (!response.ok || !result.success) {
-        console.warn('API failed, falling back to mock data:', result.error);
-        return this.getMockEarningsCalendarMonth(year, month);
+        console.error('API failed:', result.error);
+        return {
+          success: false,
+          data: {},
+          error: result.error || 'Failed to fetch earnings calendar'
+        };
       }
       
       // Return actual data from database
       return result;
     } catch (error) {
-      console.error('Error fetching earnings calendar, falling back to mock data:', error);
-      return this.getMockEarningsCalendarMonth(year, month);
+      console.error('Error fetching earnings calendar:', error);
+      return {
+        success: false,
+        data: {},
+        error: error instanceof Error ? error.message : 'Network error'
+      };
     }
   },
 
@@ -50,10 +58,11 @@ export const earningsApi = {
       return result;
     } catch (error) {
       console.error('Error fetching upcoming earnings:', error);
-      // Fallback to mock data
+      // Return proper error response
       return {
-        success: true,
-        data: []
+        success: false,
+        data: [],
+        error: error instanceof Error ? error.message : 'Failed to fetch upcoming earnings'
       };
     }
   },

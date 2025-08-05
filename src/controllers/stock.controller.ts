@@ -1,28 +1,25 @@
 import { Request, Response } from 'express';
-import { db } from '../services/database';
+import { db } from '../services/database/index';
 import { StockDataFetcher } from '../services/stock/stock-data-fetcher';
 import { FundamentalAnalyzer } from '../services/stock/fundamental-analyzer';
 import { PeerComparisonEngine } from '../services/stock/peer-comparison-engine';
 import { StockScannerJobs } from '../services/stock/stock-scanner-jobs';
 import { DatabaseQueueService } from '../services/database/queue';
 import { cache } from '../services/cache';
-import { Logger } from '../utils/stock-logger';
-
-const logger = new Logger('StockController');
+import { logger } from '../utils/logger';
 
 // Initialize services
-const stockDataFetcher = new StockDataFetcher(cache);
+// const stockDataFetcher = new StockDataFetcher(logger);
 const fundamentalAnalyzer = new FundamentalAnalyzer();
 const peerComparisonEngine = new PeerComparisonEngine(cache);
-const queueService = new DatabaseQueueService(db);
+const queueService = new DatabaseQueueService();
 
 // Get list of tracked stock symbols
 export async function getStockSymbols(req: Request, res: Response) {
   try {
     const { sector, industry, active = true } = req.query;
     
-    let query = db.getClient()
-      .from('stock_symbols')
+    let query = db.from('stock_symbols')
       .select('*')
       .order('symbol', { ascending: true });
     
@@ -67,7 +64,7 @@ export async function addStockSymbol(req: Request, res: Response) {
       });
     }
     
-    const { data, error } = await db.getClient()
+    const { data, error } = await db
       .from('stock_symbols')
       .insert({
         symbol: symbol.toUpperCase(),
@@ -117,7 +114,7 @@ export async function getStockFundamentals(req: Request, res: Response) {
     const { days = 30 } = req.query;
     
     // Get symbol ID
-    const { data: symbolData, error: symbolError } = await db.getClient()
+    const { data: symbolData, error: symbolError } = await db
       .from('stock_symbols')
       .select('id')
       .eq('symbol', symbol.toUpperCase())
@@ -134,7 +131,7 @@ export async function getStockFundamentals(req: Request, res: Response) {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - Number(days));
     
-    const { data, error } = await db.getClient()
+    const { data, error } = await db
       .from('stock_fundamentals')
       .select('*')
       .eq('symbol_id', symbolData.id)
@@ -171,7 +168,7 @@ export async function getScannerResults(req: Request, res: Response) {
       offset = 0
     } = req.query;
     
-    let query = db.getClient()
+    let query = db
       .from('stock_scanner_results')
       .select(`
         *,
@@ -184,7 +181,7 @@ export async function getScannerResults(req: Request, res: Response) {
       query = query.eq('scan_date', date);
     } else {
       // Default to latest scan date
-      const { data: latestDate } = await db.getClient()
+      const { data: latestDate } = await db
         .from('stock_scanner_results')
         .select('scan_date')
         .order('scan_date', { ascending: false })
@@ -241,7 +238,7 @@ export async function getStockAlerts(req: Request, res: Response) {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - Number(days));
     
-    let query = db.getClient()
+    let query = db
       .from('stock_scanner_results')
       .select(`
         *,
@@ -342,7 +339,7 @@ export async function getPeerComparison(req: Request, res: Response) {
     const { symbol } = req.params;
     
     // Get symbol ID
-    const { data: symbolData, error: symbolError } = await db.getClient()
+    const { data: symbolData, error: symbolError } = await db
       .from('stock_symbols')
       .select('id')
       .eq('symbol', symbol.toUpperCase())
@@ -357,7 +354,7 @@ export async function getPeerComparison(req: Request, res: Response) {
     
     // Check cache first
     const cacheKey = `peer_comparison:${symbolData.id}:${new Date().toISOString().split('T')[0]}`;
-    const cached = await cacheService.get(cacheKey);
+    const cached = await cache.get(cacheKey);
     
     if (cached) {
       return res.json({
@@ -393,7 +390,7 @@ export async function getWatchlist(req: Request, res: Response) {
   try {
     const { priority, active = true } = req.query;
     
-    let query = db.getClient()
+    let query = db
       .from('stock_watchlist')
       .select(`
         *,
@@ -434,7 +431,7 @@ export async function addToWatchlist(req: Request, res: Response) {
     const { symbol, reason, priority = 'medium', alertThreshold } = req.body;
     
     // Get symbol ID
-    const { data: symbolData, error: symbolError } = await db.getClient()
+    const { data: symbolData, error: symbolError } = await db
       .from('stock_symbols')
       .select('id')
       .eq('symbol', symbol.toUpperCase())
@@ -447,7 +444,7 @@ export async function addToWatchlist(req: Request, res: Response) {
       });
     }
     
-    const { data, error } = await db.getClient()
+    const { data, error } = await db
       .from('stock_watchlist')
       .insert({
         symbol_id: symbolData.id,
@@ -487,7 +484,7 @@ export async function getTopMovers(req: Request, res: Response) {
   try {
     const { limit = 10 } = req.query;
     
-    const { data, error } = await db.getClient()
+    const { data, error } = await db
       .from('v_stock_top_movers')
       .select('*')
       .limit(Number(limit));

@@ -1,9 +1,9 @@
 // Feed management controller following CLAUDE.md specification
 import { Request, Response } from 'express';
-import { db } from '@/services/database';
-import { cache, cacheKeys, cacheTtl } from '@/services/cache';
+import { db } from '@/services/database/index';
+import { cache, cacheKeys, cacheTtl } from '@/services/cache/index';
 import { queueService } from '@/services/database/queue';
-import { FeedSource, CreateFeedSourceData, UpdateFeedSourceData, ApiResponse } from '@/types';
+import { FeedSource, CreateFeedSourceData, UpdateFeedSourceData, ApiResponse, FeedConfig } from '@/types';
 import { asyncHandler } from '@/middleware/error';
 import { NotFoundError, ConflictError } from '@/middleware/error';
 import { createContextLogger } from '@/utils/logger';
@@ -200,11 +200,18 @@ export class FeedController {
       }
 
       // Create feed source with snake_case fields for database
+      const defaultConfig: FeedConfig = {
+        categories: data.config?.categories || ['general'],
+        priority: data.config?.priority || 'medium',
+        updateFrequency: data.config?.updateFrequency || 'hourly',
+        ...(data.config || {})
+      } as FeedConfig;
+      
       const createData = {
         name: data.name,
         type: data.type,
         url: data.url,
-        config: data.config || {},
+        config: defaultConfig,
         is_active: true  // Note: Using snake_case for database
       };
       

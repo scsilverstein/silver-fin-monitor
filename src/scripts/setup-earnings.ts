@@ -6,6 +6,8 @@ import { logger } from '../utils/logger.js';
 
 // Mock database implementation for this script
 class MockDatabase implements Database {
+  public: any = {};
+
   async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
     logger.info('Mock query executed:', { sql: sql.substring(0, 100), params: params?.length });
     

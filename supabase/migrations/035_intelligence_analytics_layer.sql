@@ -622,12 +622,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Schedule refresh every hour
-SELECT cron.schedule(
-    'refresh-intelligence-views',
-    '0 * * * *', -- Every hour
-    $$SELECT refresh_intelligence_views()$$
-);
+-- Schedule refresh every hour (requires pg_cron extension)
+-- SELECT cron.schedule(
+--     'refresh-intelligence-views',
+--     '0 * * * *', -- Every hour
+--     $$SELECT refresh_intelligence_views()$$
+-- );
 
 -- =====================================================
 -- COMMENTS FOR DOCUMENTATION

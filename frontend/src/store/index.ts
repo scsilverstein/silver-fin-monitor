@@ -92,3 +92,9 @@ export const useAppStore = create<AppState>()(
     )
   )
 );
+
+// Export all stores
+export { useFeedStore } from './feed.store';
+export { useAnalysisStore } from './analysis.store';
+export { useStockStore } from './stock.store';
+export { useDashboardStore } from './dashboard.store';

@@ -77,7 +77,7 @@ export class AuthController {
       authLogger.error('Registration failed', error);
       res.status(400).json({
         success: false,
-        message: error.message
+        message: error instanceof Error ? error.message : 'Registration failed'
       } as AuthResponse);
     }
   });
@@ -227,7 +227,7 @@ export class AuthController {
         message: 'Login successful'
       });
     } catch (error) {
-      authLogger.warn('Login failed', { email, error: error.message });
+      authLogger.warn('Login failed', { email, error: error instanceof Error ? error.message : 'Login failed' });
       res.status(401).json({
         success: false,
         error: {
@@ -353,7 +353,7 @@ export class AuthController {
       authLogger.error('Profile update failed', error);
       res.status(400).json({
         success: false,
-        message: error.message
+        message: error instanceof Error ? error.message : 'Profile update failed'
       } as AuthResponse);
     }
   });
@@ -408,7 +408,7 @@ export class AuthController {
       authLogger.error('Password change failed', error);
       res.status(400).json({
         success: false,
-        message: error.message
+        message: error instanceof Error ? error.message : 'Password change failed'
       } as AuthResponse);
     }
   });

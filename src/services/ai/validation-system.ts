@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../../utils/logger.js';
-import { supabase } from '../database/index.js';
+import { db } from '../database/index';
 import { EnhancedAnalysisResult, EnsemblePrediction } from './enhanced-analysis.js';
 
 interface ValidationResult {
@@ -206,13 +206,13 @@ export class ValidationSystem {
   private checkStepLogic(step: any, index: number): boolean {
     // Check if step has required components
     const hasEvidence = step.evidence && Array.isArray(step.evidence) && step.evidence.length > 0;
-    const hasAnalysis = step.analysis && step.analysis.length > 50;
+    const hasAnalysis = step.reasoning && step.reasoning.length > 50;
     const hasConfidence = step.confidence && step.confidence >= 0.1 && step.confidence <= 1.0;
     
     // Check logical flow
     const logicalKeywords = ['because', 'therefore', 'since', 'given that', 'as a result'];
     const hasLogicalFlow = logicalKeywords.some(keyword => 
-      step.analysis?.toLowerCase().includes(keyword)
+      step.reasoning?.toLowerCase().includes(keyword)
     );
 
     return hasEvidence && hasAnalysis && hasConfidence && (index === 0 || hasLogicalFlow);
@@ -262,9 +262,9 @@ export class ValidationSystem {
     const positiveWords = ['good', 'strong', 'positive', 'bullish', 'optimistic'];
     const negativeWords = ['bad', 'weak', 'negative', 'bearish', 'pessimistic'];
     
-    const stepSentiment = this.calculateTextSentiment(step.analysis, positiveWords, negativeWords);
+    const stepSentiment = this.calculateTextSentiment(step.reasoning, positiveWords, negativeWords);
     const avgSentiment = allSteps.reduce((sum, s) => 
-      sum + this.calculateTextSentiment(s.analysis || '', positiveWords, negativeWords), 0
+      sum + this.calculateTextSentiment(s.reasoning || '', positiveWords, negativeWords), 0
     ) / allSteps.length;
     
     const sentimentConsistency = 1 - Math.abs(stepSentiment - avgSentiment) / 2;
@@ -317,7 +317,7 @@ export class ValidationSystem {
     
     // Check reasoning chain for overconfident language
     const overconfidentPhrases = ['certainly', 'definitely', 'without doubt', 'clearly', 'obviously'];
-    const reasoningText = analysis.reasoning_chain?.map(step => step.analysis || '').join(' ').toLowerCase();
+    const reasoningText = analysis.reasoning_chain?.map(step => step.reasoning || '').join(' ').toLowerCase();
     const overconfidentCount = overconfidentPhrases.filter(phrase => 
       reasoningText.includes(phrase)
     ).length;
@@ -335,7 +335,7 @@ export class ValidationSystem {
     
     // Check if contrarian views are mentioned
     const contraryPhrases = ['however', 'on the other hand', 'alternatively', 'contrary to'];
-    const reasoningText = analysis.reasoning_chain?.map(step => step.analysis || '').join(' ').toLowerCase();
+    const reasoningText = analysis.reasoning_chain?.map(step => step.reasoning || '').join(' ').toLowerCase();
     const contraryMentions = contraryPhrases.filter(phrase => 
       reasoningText.includes(phrase)
     ).length;
@@ -353,7 +353,7 @@ export class ValidationSystem {
    */
   private detectAnchoringBias(analysis: EnhancedAnalysisResult): number {
     // Check if analysis heavily references specific numbers or percentages early on
-    const firstStep = analysis.reasoning_chain?.[0]?.analysis || '';
+    const firstStep = analysis.reasoning_chain?.[0]?.reasoning || '';
     const numberMatches = firstStep.match(/\d+\.?\d*%?/g) || [];
     
     // If many specific numbers in first step, potential anchoring
@@ -376,7 +376,7 @@ export class ValidationSystem {
   private detectAvailabilityBias(analysis: EnhancedAnalysisResult): number {
     // Check for over-reliance on recent events or easily recalled information
     const recentPhrases = ['recently', 'latest', 'current', 'just announced', 'breaking'];
-    const reasoningText = analysis.reasoning_chain?.map(step => step.analysis || '').join(' ').toLowerCase();
+    const reasoningText = analysis.reasoning_chain?.map(step => step.reasoning || '').join(' ').toLowerCase();
     
     const recentMentions = recentPhrases.filter(phrase => 
       reasoningText.includes(phrase)
@@ -394,7 +394,7 @@ export class ValidationSystem {
   private detectRecencyBias(analysis: EnhancedAnalysisResult): number {
     // Similar to availability bias but specifically for recent time periods
     const timeReferences = ['today', 'yesterday', 'this week', 'past few days'];
-    const reasoningText = analysis.reasoning_chain?.map(step => step.analysis || '').join(' ').toLowerCase();
+    const reasoningText = analysis.reasoning_chain?.map(step => step.reasoning || '').join(' ').toLowerCase();
     
     const recentTimeRefs = timeReferences.filter(ref => 
       reasoningText.includes(ref)
@@ -851,7 +851,7 @@ export class ValidationSystem {
 
   private detectStepBiases(step: any): string[] {
     const biases: string[] = [];
-    const analysis = step.analysis || '';
+    const analysis = step.reasoning || '';
     
     // Simple bias detection based on language patterns
     if (/certainly|definitely|obviously/.test(analysis.toLowerCase())) {

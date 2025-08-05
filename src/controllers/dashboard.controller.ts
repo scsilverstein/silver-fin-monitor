@@ -1,453 +1,517 @@
-import { Request, Response } from 'express';
-import { supabase } from '@/services/database/client';
-import { cacheService } from '@/services/database/cache';
-import { logger } from '@/utils/logger';
+// Dashboard controller following CLAUDE.md specification
+import { Request, Response, NextFunction } from 'express';
+import { DatabaseService } from '../services/database/db.service';
+import { CacheService } from '../services/cache/cache.service';
+import { QueueService } from '../services/queue/queue.service';
+import { OpenAIService } from '../services/ai/openai.service';
+import winston from 'winston';
 
 export class DashboardController {
-  async getTimeframeThemes(req: Request, res: Response): Promise<void> {
-    try {
-      const { timeframe = 'week' } = req.query;
-      const cacheKey = `dashboard:themes:${timeframe}`;
-      const cached = await cacheService.get<any>(cacheKey);
-      
-      if (cached && typeof cached === 'object' && 'data' in cached) {
-        res.json(cached);
-        return;
-      }
+  constructor(
+    private db: DatabaseService,
+    private cache: CacheService,
+    private queue: QueueService,
+    private aiService: OpenAIService,
+    private logger: winston.Logger
+  ) {}
 
-      // Calculate date range based on timeframe
-      const endDate = new Date();
-      const startDate = new Date();
-      
-      switch (timeframe) {
-        case 'week':
-          startDate.setDate(startDate.getDate() - 7);
-          break;
-        case 'month':
-          startDate.setMonth(startDate.getMonth() - 1);
-          break;
-        case 'year':
-          startDate.setFullYear(startDate.getFullYear() - 1);
-          break;
-        default:
-          startDate.setDate(startDate.getDate() - 7);
-      }
-
-      // Get all daily analyses for the timeframe
-      const { data: analyses } = await supabase
-        .from('daily_analysis')
-        .select('key_themes, analysis_date, ai_analysis')
-        .gte('analysis_date', startDate.toISOString().split('T')[0])
-        .lte('analysis_date', endDate.toISOString().split('T')[0])
-        .order('analysis_date', { ascending: false });
-
-      // Aggregate themes across the timeframe
-      const themeCount = new Map<string, number>();
-      const marketDrivers = new Map<string, number>();
-      const riskFactors = new Map<string, number>();
-      
-      analyses?.forEach(analysis => {
-        // Count key themes
-        analysis.key_themes?.forEach((theme: string) => {
-          themeCount.set(theme, (themeCount.get(theme) || 0) + 1);
-        });
-        
-        // Count market drivers
-        analysis.ai_analysis?.market_drivers?.forEach((driver: string) => {
-          marketDrivers.set(driver, (marketDrivers.get(driver) || 0) + 1);
-        });
-        
-        // Count risk factors
-        analysis.ai_analysis?.risk_factors?.forEach((risk: string) => {
-          riskFactors.set(risk, (riskFactors.get(risk) || 0) + 1);
-        });
-      });
-
-      // Sort and get top themes
-      const topThemes = Array.from(themeCount.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([theme]) => theme);
-        
-      const topMarketDrivers = Array.from(marketDrivers.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([driver]) => driver);
-        
-      const topRiskFactors = Array.from(riskFactors.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([risk]) => risk);
-
-      const result = {
-        success: true,
-        data: {
-          timeframe,
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-          themes: topThemes,
-          marketDrivers: topMarketDrivers,
-          riskFactors: topRiskFactors,
-          analysisCount: analyses?.length || 0
-        }
-      };
-
-      await cacheService.set(cacheKey, result, 3600); // Cache for 1 hour
-      res.json(result);
-    } catch (error) {
-      logger.error('Get timeframe themes error', { error });
-      res.status(500).json({ error: 'Failed to fetch timeframe themes' });
-    }
-  }
-
-  async getOverview(req: Request, res: Response): Promise<void> {
+  // Get dashboard overview
+  async getOverview(req: Request, res: Response, next: NextFunction) {
     try {
       const cacheKey = 'dashboard:overview';
-      const cached = await cacheService.get<any>(cacheKey);
-      if (cached && typeof cached === 'object' && 'success' in cached && 'data' in cached) {
-        res.json(cached);
-        return;
+      const cached = await this.cache.get(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          data: cached
+        });
       }
 
-      // Get latest daily analysis
-      const { data: latestAnalysis } = await supabase
-        .from('daily_analysis')
-        .select('*')
-        .order('analysis_date', { ascending: false })
-        .limit(1)
-        .single();
+      // Get latest daily analysis using table operations
+      const latestAnalyses = await this.db.tables.dailyAnalysis.findMany(
+        {},
+        { 
+          orderBy: { field: 'analysis_date', ascending: false },
+          limit: 1
+        }
+      );
+      const latestAnalysis = latestAnalyses[0];
 
-      // Get feed statistics
-      const { data: feedStats } = await supabase
-        .from('feed_sources')
-        .select('type, is_active')
-        .eq('is_active', true);
+      // Get feed statistics using table operations
+      const allFeeds = await this.db.tables.feedSources.findMany();
+      const activeFeeds = allFeeds.filter((f: any) => f.is_active);
+      const feedTypes = [...new Set(allFeeds.map((f: any) => f.type))];
+      
+      const feedStats = [{
+        total_feeds: allFeeds.length,
+        active_feeds: activeFeeds.length,
+        feed_types: feedTypes.length
+      }];
 
-      const feedCounts = feedStats?.reduce((acc, feed) => {
-        acc[feed.type] = (acc[feed.type] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>) || {};
+      // Get feed type breakdown
+      const feedTypeMap = new Map<string, number>();
+      activeFeeds.forEach((feed: any) => {
+        feedTypeMap.set(feed.type, (feedTypeMap.get(feed.type) || 0) + 1);
+      });
+      const feedTypeBreakdown = Array.from(feedTypeMap.entries()).map(([type, count]) => ({
+        type,
+        count
+      }));
 
-      // Get processing statistics for content published in last 24 hours
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-
-      // Get content that was processed in the last 24 hours
-      // Since we can't filter by published_at from raw_feeds, we'll use created_at
-      const { data: recentContent } = await supabase
+      // Get recent content statistics - use Supabase client directly
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      const supabaseClient = this.db.getClient();
+      
+      // Get recent content with proper Supabase query
+      const { data: recentContent, error: contentError } = await supabaseClient
         .from('processed_content')
-        .select('sentiment_score, created_at')
-        .gte('created_at', yesterday.toISOString())
-        .order('created_at', { ascending: false });
-
-      // Calculate average sentiment
-      const avgSentiment = recentContent?.length 
-        ? recentContent.reduce((sum, item) => sum + item.sentiment_score, 0) / recentContent.length
+        .select('*')
+        .gte('created_at', sevenDaysAgo.toISOString());
+      
+      if (contentError) {
+        this.logger.error('Error fetching recent content:', contentError);
+        throw contentError;
+      }
+      
+      const sentimentScores = (recentContent || [])
+        .map(c => c.sentiment_score)
+        .filter(s => s !== null && s !== undefined);
+      
+      const avgSentiment = sentimentScores.length > 0
+        ? sentimentScores.reduce((a, b) => a + b, 0) / sentimentScores.length
         : 0;
+      
+      const uniqueDays = new Set(
+        (recentContent || []).map(c => new Date(c.created_at).toDateString())
+      );
+      
+      const contentStats = [{
+        total_content: (recentContent || []).length,
+        avg_sentiment: avgSentiment,
+        days_with_content: uniqueDays.size
+      }];
 
       // Get active predictions
-      const { data: activePredictions } = await supabase
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      // Get predictions with joined analysis data
+      const { data: activePredictions, error: predError } = await supabaseClient
         .from('predictions')
-        .select('*')
+        .select(`
+          *,
+          daily_analysis!inner(analysis_date)
+        `)
+        .gte('created_at', thirtyDaysAgo.toISOString())
         .order('created_at', { ascending: false })
-        .limit(5);
+        .limit(10);
+      
+      if (predError) {
+        this.logger.error('Error fetching predictions:', predError);
+        throw predError;
+      }
+
+      // Get key themes from latest analysis  
+      const analysisData = latestAnalysis as any;
+      const keyThemes = analysisData?.key_themes || [];
+      const marketDrivers = analysisData?.ai_analysis?.key_drivers || [];
+      const riskFactors = analysisData?.ai_analysis?.risk_factors || [];
 
       const overview = {
-        marketSentiment: latestAnalysis?.market_sentiment || 'neutral',
-        sentimentScore: avgSentiment,
-        lastAnalysisDate: latestAnalysis?.analysis_date || null,
-        confidenceScore: latestAnalysis?.confidence_score || 0,
-        activeFeedSources: feedStats?.length || 0,
-        feedTypes: feedCounts,
-        recentContentCount: recentContent?.length || 0,
-        keyThemes: latestAnalysis?.key_themes || [],
-        marketDrivers: latestAnalysis?.ai_analysis?.market_drivers || [],
-        riskFactors: latestAnalysis?.ai_analysis?.risk_factors || [],
-        activePredictions: activePredictions || [],
-        // Add source tracking information
-        contributingSources: {
-          sourceIds: latestAnalysis?.ai_analysis?.source_ids || [],
-          sources: latestAnalysis?.ai_analysis?.sources || [],
-          sourceBreakdown: latestAnalysis?.ai_analysis?.source_breakdown || []
-        }
-      };
-
-      const response = {
-        success: true,
-        data: overview
-      };
-      
-      await cacheService.set(cacheKey, response, 300); // 5 minutes
-      res.json(response);
-    } catch (error) {
-      logger.error('Dashboard overview error', { error });
-      res.status(500).json({ error: 'Failed to fetch dashboard overview' });
-    }
-  }
-
-  async getTrends(req: Request, res: Response): Promise<void> {
-    try {
-      const { days = 7 } = req.query;
-      const cacheKey = `dashboard:trends:${days}`;
-      const cached = await cacheService.get<any>(cacheKey);
-      if (cached && typeof cached === 'object' && 'success' in cached && 'data' in cached) {
-        res.json(cached);
-        return;
-      }
-
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - Number(days));
-
-      // Get daily sentiment trends
-      const { data: dailyAnalyses } = await supabase
-        .from('daily_analysis')
-        .select('analysis_date, market_sentiment, confidence_score')
-        .gte('analysis_date', startDate.toISOString().split('T')[0])
-        .order('analysis_date', { ascending: true });
-
-      // Get sentiment scores by day
-      const { data: contentByDay } = await supabase
-        .from('processed_content')
-        .select('sentiment_score, created_at')
-        .gte('created_at', startDate.toISOString())
-        .order('created_at', { ascending: true });
-
-      // Group by day
-      const sentimentByDay = new Map<string, { total: number; count: number }>();
-      contentByDay?.forEach(item => {
-        const day = item.created_at.split('T')[0];
-        if (!sentimentByDay.has(day)) {
-          sentimentByDay.set(day, { total: 0, count: 0 });
-        }
-        const dayData = sentimentByDay.get(day)!;
-        dayData.total += item.sentiment_score;
-        dayData.count += 1;
-      });
-
-      const sentimentTrend = Array.from(sentimentByDay.entries()).map(([date, data]) => {
-        const avgSentiment = data.total / data.count;
-        return {
-          date,
-          sentiment: avgSentiment > 0.2 ? 'bullish' : avgSentiment < -0.2 ? 'bearish' : 'neutral', // Keep for backward compatibility
-          sentimentScore: avgSentiment, // Actual continuous value
-          confidence: Math.abs(avgSentiment), // Use absolute value as proxy for confidence
-          volume: data.count
-        };
-      });
-
-      // Get topic trends with normalization
-      const { data: topicData } = await supabase
-        .from('processed_content')
-        .select('key_topics, created_at')
-        .gte('created_at', startDate.toISOString());
-
-      const topicCounts = new Map<string, Map<string, number>>();
-      const dailyContentCounts = new Map<string, number>();
-      
-      topicData?.forEach(item => {
-        const day = item.created_at.split('T')[0];
+        // Stats expected by frontend
+        totalSources: feedStats[0]?.total_feeds || 0,
+        activeSources: feedStats[0]?.active_feeds || 0,
+        todayFeeds: contentStats[0]?.total_content || 0,
+        processedToday: contentStats[0]?.total_content || 0,
         
-        // Track total content items per day
-        dailyContentCounts.set(day, (dailyContentCounts.get(day) || 0) + 1);
+        // Market sentiment
+        marketSentiment: {
+          label: analysisData?.market_sentiment || 'neutral',
+          score: contentStats[0]?.avg_sentiment || 0,
+          confidence: analysisData?.confidence_score || 0
+        },
         
-        if (!topicCounts.has(day)) {
-          topicCounts.set(day, new Map());
-        }
-        const dayTopics = topicCounts.get(day)!;
-        item.key_topics.forEach((topic: string) => {
-          dayTopics.set(topic, (dayTopics.get(topic) || 0) + 1);
-        });
-      });
-
-      const trends = {
-        sentimentTrend,
-        dailyAnalyses: dailyAnalyses || [],
-        topicTrends: Array.from(topicCounts.entries()).map(([date, topics]) => {
-          const totalContentItems = dailyContentCounts.get(date) || 1;
-          return {
-            date,
-            totalContentItems, // Include for reference
-            topics: Array.from(topics.entries())
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 5)
-              .map(([topic, rawCount]) => ({ 
-                topic, 
-                count: parseFloat((rawCount / totalContentItems * 100).toFixed(1)), // Normalized to percentage
-                rawCount,
-                normalizedMentions: parseFloat((rawCount / totalContentItems).toFixed(3))
-              }))
-          };
-        })
+        // System health
+        systemHealth: {
+          feedProcessing: 'healthy',
+          aiAnalysis: latestAnalysis ? 'healthy' : 'degraded',
+          queueStatus: 'healthy',
+          lastUpdate: new Date()
+        },
+        
+        // Latest analysis (with camelCase fields)
+        latestAnalysis: latestAnalysis ? {
+          analysisDate: analysisData.analysis_date,
+          keyThemes: keyThemes,
+          overallSummary: analysisData.overall_summary || 'No summary available',
+          marketSentiment: analysisData.market_sentiment,
+          confidenceScore: analysisData.confidence_score,
+          sourcesAnalyzed: analysisData.sources_analyzed,
+          aiAnalysis: analysisData.ai_analysis || {}
+        } : null,
+        
+        // Recent predictions
+        recentPredictions: (activePredictions || []).map(pred => ({
+          ...pred,
+          analysis_date: pred.daily_analysis?.analysis_date || null
+        })),
+        
+        // Additional data for other components
+        sentimentScore: contentStats[0]?.avg_sentiment || 0,
+        lastAnalysisDate: analysisData?.analysis_date || null,
+        confidenceScore: analysisData?.confidence_score || 0,
+        activeFeedSources: feedStats[0]?.active_feeds || 0,
+        feedTypes: feedTypeBreakdown.reduce((acc: any, item: any) => {
+          acc[item.type] = item.count;
+          return acc;
+        }, {}),
+        recentContentCount: contentStats[0]?.total_content || 0,
+        keyThemes,
+        marketDrivers,
+        riskFactors,
+        activePredictions: (activePredictions || []).map(pred => ({
+          ...pred,
+          analysis_date: pred.daily_analysis?.analysis_date || null
+        }))
       };
 
-      const response = {
-        success: true,
-        data: trends
-      };
-      
-      await cacheService.set(cacheKey, response, 600); // 10 minutes
-      res.json(response);
-    } catch (error) {
-      logger.error('Dashboard trends error', { error });
-      res.status(500).json({ error: 'Failed to fetch trends' });
-    }
-  }
-
-  async getPredictions(req: Request, res: Response): Promise<void> {
-    try {
-      const { timeHorizon, type } = req.query;
-      
-      let query = supabase
-        .from('predictions')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1000);
-
-      if (timeHorizon) {
-        query = query.eq('time_horizon', timeHorizon);
-      }
-      if (type) {
-        query = query.eq('prediction_type', type);
-      }
-
-      const { data: predictions, error } = await query;
-
-      if (error) throw error;
+      await this.cache.set(cacheKey, overview, { ttl: 300 }); // 5 minutes
 
       res.json({
         success: true,
-        data: {
-          predictions: predictions || [],
-          filters: {
-            timeHorizons: ['1_week', '1_month', '3_months', '6_months', '1_year'],
-            types: ['market_direction', 'economic_indicator', 'geopolitical_event']
-          }
-        }
+        data: overview
       });
     } catch (error) {
-      logger.error('Dashboard predictions error', { error });
-      res.status(500).json({ error: 'Failed to fetch predictions' });
+      next(error);
     }
   }
 
-  async getAccuracy(req: Request, res: Response): Promise<void> {
+  // Get market trends
+  async getTrends(req: Request, res: Response, next: NextFunction) {
     try {
-      const cacheKey = 'dashboard:accuracy';
-      const cached = await cacheService.get<any>(cacheKey);
-      if (cached && typeof cached === 'object' && 'success' in cached && 'data' in cached) {
-        res.json(cached);
-        return;
+      const { days = 7 } = req.query;
+      const cacheKey = `dashboard:trends:${days}`;
+      const cached = await this.cache.get(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          data: cached
+        });
       }
 
-      // Get prediction comparisons
-      // For now, we'll get comparisons without the join
-      const { data: comparisons } = await supabase
-        .from('prediction_comparisons')
-        .select('*')
-        .order('comparison_date', { ascending: false })
-        .limit(10000);
+      // Get sentiment trend
+      const sentimentTrend = await this.db.query(
+        `SELECT 
+          DATE(created_at) as date,
+          AVG(sentiment_score) as sentiment,
+          COUNT(*) as volume
+         FROM processed_content
+         WHERE created_at >= NOW() - INTERVAL '${Number(days)} days'
+         GROUP BY DATE(created_at)
+         ORDER BY date DESC`
+      );
 
-      // Calculate accuracy metrics
-      const accuracyByType = new Map<string, { correct: number; total: number }>();
-      const accuracyByHorizon = new Map<string, { correct: number; total: number }>();
-      
-      // Since we don't have prediction data, we'll return empty metrics for now
-      // This would need a separate query to get prediction details
+      // Get daily analyses
+      const dailyAnalyses = await this.db.query(
+        `SELECT 
+          analysis_date,
+          market_sentiment,
+          confidence_score,
+          sources_analyzed
+         FROM daily_analysis
+         WHERE analysis_date >= CURRENT_DATE - INTERVAL '${Number(days)} days'
+         ORDER BY analysis_date DESC`
+      );
 
-      const accuracy = {
-        overall: comparisons?.length 
-          ? comparisons.reduce((sum, comp) => sum + comp.accuracy_score, 0) / comparisons.length
-          : 0,
-        byType: Array.from(accuracyByType.entries()).map(([type, stats]) => ({
-          type,
-          accuracy: stats.total > 0 ? stats.correct / stats.total : 0,
-          total: stats.total
-        })),
-        byHorizon: Array.from(accuracyByHorizon.entries()).map(([horizon, stats]) => ({
-          horizon,
-          accuracy: stats.total > 0 ? stats.correct / stats.total : 0,
-          total: stats.total
-        })),
-        recentComparisons: comparisons?.slice(0, 10) || []
+      // Get topic trends
+      const topicTrends = await this.db.query(
+        `SELECT 
+          DATE(created_at) as date,
+          unnest(key_topics) as topic,
+          COUNT(*) as count
+         FROM processed_content
+         WHERE created_at >= NOW() - INTERVAL '${Number(days)} days'
+         GROUP BY date, topic
+         ORDER BY date DESC, count DESC`
+      );
+
+      // Transform dailyAnalyses to camelCase
+      const transformedDailyAnalyses = dailyAnalyses.map((row: any) => ({
+        analysisDate: row.analysis_date,
+        marketSentiment: row.market_sentiment,
+        confidenceScore: row.confidence_score,
+        sourcesAnalyzed: row.sources_analyzed
+      }));
+
+      const trends = {
+        sentimentTrend,
+        dailyAnalyses: transformedDailyAnalyses,
+        topicTrends: this.groupTopicsByDate(topicTrends)
       };
 
-      const response = {
+      await this.cache.set(cacheKey, trends, { ttl: 900 }); // 15 minutes
+
+      res.json({
         success: true,
-        data: accuracy
-      };
-      
-      await cacheService.set(cacheKey, response, 3600); // 1 hour
-      res.json(response);
+        data: trends
+      });
     } catch (error) {
-      logger.error('Dashboard accuracy error', { error });
-      res.status(500).json({ error: 'Failed to fetch accuracy data' });
+      next(error);
     }
   }
 
-  async getRealtimeStats(req: Request, res: Response): Promise<void> {
+  // Get key themes for a timeframe
+  async getThemes(req: Request, res: Response, next: NextFunction) {
     try {
-      const lastHour = new Date();
-      lastHour.setHours(lastHour.getHours() - 1);
+      const { timeframe = 'week' } = req.query;
+      const cacheKey = `dashboard:themes:${timeframe}`;
+      const cached = await this.cache.get(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          data: cached
+        });
+      }
 
-      // Get queue statistics with job types
-      const { data: queueStats } = await supabase
-        .from('job_queue')
-        .select('status, job_type')
-        .gte('created_at', lastHour.toISOString());
+      const days = timeframe === 'week' ? 7 : timeframe === 'month' ? 30 : 365;
 
-      const queueCounts = queueStats?.reduce((acc, job) => {
-        acc[job.status] = (acc[job.status] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>) || {};
+      // Get aggregated themes
+      const themes = await this.db.query(
+        `SELECT 
+          unnest(key_themes) as theme,
+          COUNT(*) as occurrence_count,
+          COUNT(DISTINCT analysis_date) as days_mentioned
+         FROM daily_analysis
+         WHERE analysis_date >= CURRENT_DATE - INTERVAL '${days} days'
+         GROUP BY theme
+         ORDER BY occurrence_count DESC
+         LIMIT 20`
+      );
 
-      // Get transcription job statistics specifically
-      const transcriptionJobs = queueStats?.filter(job => job.job_type === 'transcribe_audio') || [];
-      const transcriptionCounts = transcriptionJobs.reduce((acc, job) => {
-        acc[job.status] = (acc[job.status] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
+      // Get market drivers and risk factors
+      const marketInsights = await this.db.query(
+        `SELECT 
+          unnest(ai_analysis->'key_drivers') as market_driver,
+          COUNT(*) as count
+         FROM daily_analysis
+         WHERE analysis_date >= CURRENT_DATE - INTERVAL '${days} days'
+         AND ai_analysis->'key_drivers' IS NOT NULL
+         GROUP BY market_driver
+         ORDER BY count DESC
+         LIMIT 10`
+      );
 
-      // Get recent processing
-      const { data: recentProcessing } = await supabase
-        .from('raw_feeds')
-        .select('processing_status, metadata')
-        .gte('created_at', lastHour.toISOString());
+      const riskFactors = await this.db.query(
+        `SELECT 
+          unnest(ai_analysis->'risk_factors') as risk_factor,
+          COUNT(*) as count
+         FROM daily_analysis
+         WHERE analysis_date >= CURRENT_DATE - INTERVAL '${days} days'
+         AND ai_analysis->'risk_factors' IS NOT NULL
+         GROUP BY risk_factor
+         ORDER BY count DESC
+         LIMIT 10`
+      );
 
-      const processingCounts = recentProcessing?.reduce((acc, feed) => {
-        acc[feed.processing_status] = (acc[feed.processing_status] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>) || {};
+      const result = {
+        timeframe,
+        themes: themes.map((t: any) => t.theme),
+        marketDrivers: marketInsights.map((m: any) => m.market_driver),
+        riskFactors: riskFactors.map((r: any) => r.risk_factor),
+        startDate: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+        endDate: new Date().toISOString()
+      };
 
-      // Count feeds needing transcription
-      const feedsNeedingTranscription = recentProcessing?.filter(feed => 
-        feed.metadata?.needsTranscription === true
-      ).length || 0;
+      await this.cache.set(cacheKey, result, { ttl: 3600 }); // 1 hour
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Get predictions overview
+  async getPredictions(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { timeHorizon, type } = req.query;
+      const cacheKey = `dashboard:predictions:${timeHorizon || 'all'}:${type || 'all'}`;
+      const cached = await this.cache.get(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          data: cached
+        });
+      }
+
+      let query = `
+        SELECT 
+          p.*,
+          da.analysis_date,
+          da.market_sentiment,
+          pc.accuracy_score
+        FROM predictions p
+        JOIN daily_analysis da ON p.daily_analysis_id = da.id
+        LEFT JOIN prediction_comparisons pc ON p.id = pc.prediction_id
+        WHERE 1=1
+      `;
+      
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      if (timeHorizon) {
+        query += ` AND p.time_horizon = $${paramIndex}`;
+        params.push(timeHorizon);
+        paramIndex++;
+      }
+
+      if (type) {
+        query += ` AND p.prediction_type = $${paramIndex}`;
+        params.push(type);
+        paramIndex++;
+      }
+
+      query += ' ORDER BY p.created_at DESC LIMIT 50';
+
+      const predictions = await this.db.query(query, params);
+
+      // Get prediction statistics
+      const stats = await this.db.query(
+        `SELECT 
+          time_horizon,
+          prediction_type,
+          COUNT(*) as total,
+          COUNT(pc.id) as evaluated,
+          AVG(pc.accuracy_score) as avg_accuracy
+         FROM predictions p
+         LEFT JOIN prediction_comparisons pc ON p.id = pc.prediction_id
+         GROUP BY time_horizon, prediction_type`
+      );
+
+      const result = {
+        predictions,
+        stats
+      };
+
+      await this.cache.set(cacheKey, result, { ttl: 600 }); // 10 minutes
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Get accuracy metrics
+  async getAccuracy(req: Request, res: Response, next: NextFunction) {
+    try {
+      const cacheKey = 'dashboard:accuracy';
+      const cached = await this.cache.get(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          data: cached
+        });
+      }
+
+      // Overall accuracy
+      const [overall] = await this.db.query(
+        `SELECT 
+          AVG(accuracy_score) as overall_accuracy,
+          COUNT(*) as total_evaluated
+         FROM prediction_comparisons`
+      );
+
+      // Accuracy by type
+      const byType = await this.db.query(
+        `SELECT 
+          p.prediction_type as type,
+          AVG(pc.accuracy_score) as accuracy,
+          COUNT(pc.id) as total
+         FROM predictions p
+         JOIN prediction_comparisons pc ON p.id = pc.prediction_id
+         GROUP BY p.prediction_type
+         ORDER BY accuracy DESC`
+      );
+
+      // Accuracy by time horizon
+      const byHorizon = await this.db.query(
+        `SELECT 
+          p.time_horizon as horizon,
+          AVG(pc.accuracy_score) as accuracy,
+          COUNT(pc.id) as total
+         FROM predictions p
+         JOIN prediction_comparisons pc ON p.id = pc.prediction_id
+         GROUP BY p.time_horizon
+         ORDER BY 
+          CASE p.time_horizon
+            WHEN '1_week' THEN 1
+            WHEN '2_weeks' THEN 2
+            WHEN '1_month' THEN 3
+            WHEN '3_months' THEN 4
+            WHEN '6_months' THEN 5
+            WHEN '1_year' THEN 6
+          END`
+      );
+
+      // Recent comparisons
+      const recentComparisons = await this.db.query(
+        `SELECT 
+          pc.*,
+          p.prediction_text,
+          p.time_horizon,
+          p.prediction_type
+         FROM prediction_comparisons pc
+         JOIN predictions p ON pc.prediction_id = p.id
+         ORDER BY pc.comparison_date DESC
+         LIMIT 10`
+      );
+
+      const accuracy = {
+        overall: overall?.overall_accuracy || 0,
+        byType,
+        byHorizon,
+        recentComparisons
+      };
+
+      await this.cache.set(cacheKey, accuracy, { ttl: 1800 }); // 30 minutes
+
+      res.json({
+        success: true,
+        data: accuracy
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Get real-time statistics
+  async getRealtimeStats(req: Request, res: Response, next: NextFunction) {
+    try {
+      // Don't cache real-time stats
+      const queueStats = await this.queue.getStats();
+      
+      // Get processing statistics
+      const processingStats = await this.db.query(
+        `SELECT 
+          COUNT(CASE WHEN processing_status = 'pending' THEN 1 END) as pending,
+          COUNT(CASE WHEN processing_status = 'processing' THEN 1 END) as processing,
+          COUNT(CASE WHEN processing_status = 'completed' THEN 1 END) as completed,
+          COUNT(CASE WHEN processing_status = 'failed' THEN 1 END) as failed
+         FROM raw_feeds
+         WHERE created_at >= NOW() - INTERVAL '24 hours'`
+      );
 
       const stats = {
-        queue: {
-          pending: queueCounts.pending || 0,
-          processing: queueCounts.processing || 0,
-          completed: queueCounts.completed || 0,
-          failed: queueCounts.failed || 0
-        },
-        transcription: {
-          pending: transcriptionCounts.pending || 0,
-          processing: transcriptionCounts.processing || 0,
-          completed: transcriptionCounts.completed || 0,
-          failed: transcriptionCounts.failed || 0,
-          feedsAwaitingTranscription: feedsNeedingTranscription
-        },
-        // Total processing across all categories (for feeds page display)
-        processing: (queueCounts.processing || 0) + (transcriptionCounts.processing || 0) + (processingCounts.processing || 0),
-        totalItems: (processingCounts.pending || 0) + (processingCounts.processing || 0) + (processingCounts.completed || 0) + (processingCounts.failed || 0),
-        // Keep detailed processing stats for other uses
-        processingDetails: {
-          pending: processingCounts.pending || 0,
-          processing: processingCounts.processing || 0,
-          completed: processingCounts.completed || 0,
-          failed: processingCounts.failed || 0
-        },
-        timestamp: new Date().toISOString()
+        queue: queueStats,
+        processing: processingStats[0] || {},
+        timestamp: new Date()
       };
 
       res.json({
@@ -455,153 +519,37 @@ export class DashboardController {
         data: stats
       });
     } catch (error) {
-      logger.error('Realtime stats error', { error });
-      res.status(500).json({ error: 'Failed to fetch realtime stats' });
+      next(error);
     }
   }
 
-  async getTranscriptionStatus(req: Request, res: Response): Promise<void> {
-    try {
-      const { limit = 10000 } = req.query;
-      
-      // Get recent transcription jobs with details
-      const { data: transcriptionJobs } = await supabase
-        .from('job_queue')
-        .select('id, status, payload, attempts, error_message, created_at, started_at, completed_at')
-        .eq('job_type', 'transcribe_audio')
-        .order('created_at', { ascending: false })
-        .limit(Number(limit));
-
-      // Get feeds that need transcription
-      const { data: feedsNeedingTranscription } = await supabase
-        .from('raw_feeds')
-        .select(`
-          id, 
-          title, 
-          metadata, 
-          processing_status,
-          created_at,
-          feed_sources!inner(name, type)
-        `)
-        .eq('metadata->>needsTranscription', 'true')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      // Get recently completed transcriptions
-      const { data: recentTranscriptions } = await supabase
-        .from('raw_feeds')
-        .select(`
-          id,
-          title,
-          content,
-          metadata,
-          processing_status,
-          created_at,
-          updated_at,
-          feed_sources!inner(name, type)
-        `)
-        .not('content', 'eq', 'Transcript pending')
-        .not('content', 'eq', 'Awaiting transcription')
-        .eq('metadata->>needsTranscription', 'true')
-        .order('updated_at', { ascending: false })
-        .limit(10);
-
-      // Calculate summary statistics
-      const totalJobs = transcriptionJobs?.length || 0;
-      const jobsByStatus = transcriptionJobs?.reduce((acc, job) => {
-        acc[job.status] = (acc[job.status] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>) || {};
-
-      const avgProcessingTime = transcriptionJobs && transcriptionJobs.length > 0
-        ? transcriptionJobs
-            .filter(job => job.started_at && job.completed_at)
-            .map(job => new Date(job.completed_at!).getTime() - new Date(job.started_at!).getTime())
-            .reduce((sum, time, _, arr) => sum + time / arr.length, 0)
-        : 0;
-
-      const data = {
-        summary: {
-          totalJobs,
-          pending: jobsByStatus.pending || 0,
-          processing: jobsByStatus.processing || 0,
-          completed: jobsByStatus.completed || 0,
-          failed: jobsByStatus.failed || 0,
-          averageProcessingTimeMs: avgProcessingTime,
-          feedsAwaitingTranscription: feedsNeedingTranscription?.length || 0
-        },
-        recentJobs: transcriptionJobs || [],
-        feedsNeedingTranscription: feedsNeedingTranscription || [],
-        recentlyTranscribed: recentTranscriptions || [],
-        timestamp: new Date().toISOString()
-      };
-
-      res.json({
-        success: true,
-        data
-      });
-    } catch (error) {
-      logger.error('Transcription status error', { error });
-      res.status(500).json({ error: 'Failed to fetch transcription status' });
-    }
-  }
-
-  async getAnalysisWithSources(req: Request, res: Response): Promise<void> {
-    try {
-      const { date } = req.query;
-      
-      // Get the analysis for the specified date or latest
-      let query = supabase
-        .from('daily_analysis')
-        .select('*')
-        .order('analysis_date', { ascending: false });
-      
-      if (date) {
-        query = query.eq('analysis_date', date);
-      } else {
-        query = query.limit(1);
+  // Helper method to group topics by date
+  private groupTopicsByDate(topicData: any[]): any[] {
+    const grouped = topicData.reduce((acc: any, item: any) => {
+      const date = item.date;
+      if (!acc[date]) {
+        acc[date] = { date, topics: [] };
       }
+      acc[date].topics.push({ topic: item.topic, count: item.count });
+      return acc;
+    }, {});
 
-      const { data: analysis, error } = await query.single();
-      
-      if (error || !analysis) {
-        res.status(404).json({ error: 'Analysis not found' });
-        return;
-      }
-
-      // Get source details if we have source IDs
-      const sourceIds = analysis.ai_analysis?.source_ids || [];
-      let sourceDetails: any[] = [];
-      
-      if (sourceIds.length > 0) {
-        const { data: sources } = await supabase
-          .from('feed_sources')
-          .select('id, name, type, url')
-          .in('id', sourceIds);
-        
-        sourceDetails = sources || [];
-      }
-
-      // Return enhanced analysis with full source details
-      const result = {
-        ...analysis,
-        sources: {
-          ids: sourceIds,
-          details: sourceDetails,
-          breakdown: analysis.ai_analysis?.source_breakdown || [],
-          count: sourceIds.length
-        }
-      };
-
-      res.json({
-        success: true,
-        data: result
-      });
-    } catch (error) {
-      logger.error('Get analysis with sources error', { error });
-      res.status(500).json({ error: 'Failed to fetch analysis with sources' });
-    }
+    return Object.values(grouped).map((item: any) => ({
+      date: item.date,
+      topics: item.topics.slice(0, 5) // Top 5 topics per day
+    }));
   }
 }
 
-export const dashboardController = new DashboardController();
+// Create and export singleton instance
+import { getDatabase } from '../services/database/db.service';
+import { winstonLogger } from '../utils/logger';
+
+const db = getDatabase(winstonLogger);
+const cacheService = new CacheService(db, winstonLogger);
+const queueService = new QueueService(db, winstonLogger);
+const aiService = new OpenAIService(db, cacheService, winstonLogger);
+
+export const dashboardController = new DashboardController(db, cacheService, queueService, aiService, winstonLogger);
+
+export default DashboardController;

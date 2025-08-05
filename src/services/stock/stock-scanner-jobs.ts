@@ -5,6 +5,7 @@ import { cache } from '../cache';
 import { DatabaseQueueService } from '../database/queue';
 import { db } from '../database';
 import { Logger } from '../../utils/stock-logger';
+import winston from 'winston';
 
 const logger = new Logger('StockScannerJobs');
 
@@ -24,12 +25,34 @@ export class StockScannerJobProcessor {
   
   constructor(
     cacheService: typeof cache,
-    queueService: DatabaseQueueService
+    queueService: DatabaseQueueService,
+    logger: winston.Logger
   ) {
-    this.dataFetcher = new StockDataFetcher(cacheService);
+    this.dataFetcher = new StockDataFetcher(logger);
     this.analyzer = new FundamentalAnalyzer();
     this.peerEngine = new PeerComparisonEngine(cacheService);
     this.queueService = queueService;
+  }
+
+  private async storeFundamentals(symbol: string, data: any): Promise<void> {
+    // Store the fundamentals data in the database
+    const client = (db as any).getClient();
+    await client
+      .from('stock_data')
+      .insert({
+        symbol,
+        price: data.price,
+        market_cap: data.marketCap,
+        pe_ratio: data.peRatio,
+        forward_pe: data.forwardPE,
+      eps: data.eps,
+      forward_eps: data.forwardEPS,
+      dividend_yield: data.dividendYield,
+      revenue: data.revenue,
+      revenue_growth: data.revenueGrowth,
+      earnings_growth: data.earningsGrowth,
+      updated_at: new Date().toISOString()
+    });
   }
   
   async processJob(jobType: string, payload: any): Promise<void> {
@@ -64,28 +87,34 @@ export class StockScannerJobProcessor {
     
     if (symbols.length === 1) {
       // Single symbol fetch
-      const result = await this.dataFetcher.fetchAndStoreFundamentals(symbols[0]);
-      if (!result.success) {
-        throw new Error(`Failed to fetch ${symbols[0]}: ${result.error?.message}`);
+      try {
+        const data = await this.dataFetcher.fetchWithFallback(symbols[0]);
+        // Store the data
+        await this.storeFundamentals(symbols[0], data);
+      } catch (error) {
+        throw new Error(`Failed to fetch ${symbols[0]}: ${error}`);
       }
     } else {
-      // Bulk fetch
-      const results = await this.dataFetcher.fetchBulkFundamentals(symbols);
-      
-      // Check for failures
-      const failures = Array.from(results.entries())
-        .filter(([_, result]) => !result.success);
+      // Bulk fetch - process one by one
+      const failures: string[] = [];
+      for (const symbol of symbols) {
+        try {
+          const data = await this.dataFetcher.fetchWithFallback(symbol);
+          await this.storeFundamentals(symbol, data);
+        } catch (error) {
+          failures.push(symbol);
+          logger.error(`Failed to fetch ${symbol}:`, error);
+        }
+      }
       
       if (failures.length > 0) {
         logger.warn('Some symbols failed to fetch', {
-          failed: failures.map(([symbol]) => symbol)
+          failed: failures
         });
       }
       
       // Queue analysis for successfully fetched symbols
-      const successes = Array.from(results.entries())
-        .filter(([_, result]) => result.success)
-        .map(([symbol]) => symbol);
+      const successes = symbols.filter(symbol => !failures.includes(symbol));
       
       if (successes.length > 0) {
         await this.queueService.enqueue(
@@ -106,7 +135,8 @@ export class StockScannerJobProcessor {
     
     if (payload.symbols) {
       // Get symbol IDs from symbols
-      const { data } = await db.getClient()
+      const client = (db as any).getClient();
+      const { data } = await client
         .from('stock_symbols')
         .select('id')
         .in('symbol', payload.symbols);
@@ -114,7 +144,8 @@ export class StockScannerJobProcessor {
       symbolIds = data?.map(d => d.id) || [];
     } else {
       // Get all active symbols
-      const { data } = await db.getClient()
+      const client = (db as any).getClient();
+      const { data } = await client
         .from('stock_symbols')
         .select('id')
         .eq('is_active', true);
@@ -190,7 +221,8 @@ export class StockScannerJobProcessor {
     logger.info('Generating alerts', { date, thresholds });
     
     // Get significant changes from database function
-    const { data, error } = await db.getClient().rpc('detect_significant_changes', {
+    const client = (db as any).getClient();
+    const { data, error } = await client.rpc('detect_significant_changes', {
       p_threshold_1d: thresholds.change1d,
       p_threshold_5d: thresholds.change5d,
       p_threshold_30d: thresholds.change30d
@@ -226,7 +258,8 @@ export class StockScannerJobProcessor {
     logger.info('Starting daily stock scan');
     
     // Get all active symbols
-    const { data: symbols, error } = await db.getClient()
+    const client = (db as any).getClient();
+    const { data: symbols, error } = await client
       .from('stock_symbols')
       .select('symbol')
       .eq('is_active', true);
@@ -293,7 +326,8 @@ export const stockScannerCronJobs = [
 
 // Utility function to get watchlist symbols
 export async function getWatchlistSymbols(): Promise<string[]> {
-  const { data } = await db.getClient()
+  const client = (db as any).getClient();
+  const { data } = await client
     .from('stock_watchlist')
     .select(`
       symbol_id,

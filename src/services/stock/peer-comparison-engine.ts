@@ -141,7 +141,7 @@ export class PeerComparisonEngine {
       // Get stock classification
       const classification = await this.getStockClassification(symbolId);
       if (!classification.success) {
-        return classification;
+        return { success: false, error: classification.error };
       }
       
       // Find peer groups
@@ -186,7 +186,7 @@ export class PeerComparisonEngine {
     symbolId: string
   ): Promise<Result<StockClassification>> {
     try {
-      const { data, error } = await db.getClient()
+      const { data, error } = await (db as any).getClient()
         .from('stock_symbols')
         .select('id, symbol, sector, industry, market_cap_category')
         .eq('id', symbolId)
@@ -251,7 +251,7 @@ export class PeerComparisonEngine {
     stock: StockClassification,
     type: 'industry' | 'sector' | 'market_cap'
   ): Promise<PeerGroup> {
-    let query = db.getClient()
+    let query = (db as any).getClient()
       .from('stock_symbols')
       .select('id, symbol, sector, industry, market_cap_category')
       .eq('is_active', true)
@@ -366,7 +366,7 @@ export class PeerComparisonEngine {
       
       // Get latest fundamentals for all stocks
       const allIds = [symbolId, ...peerIds];
-      const { data, error } = await db.getClient()
+      const { data, error } = await (db as any).getClient()
         .from('stock_fundamentals')
         .select('symbol_id, ' + this.getMetricColumn(metricName))
         .in('symbol_id', allIds)
@@ -496,9 +496,11 @@ export class PeerComparisonEngine {
     }
     
     // Calculate confidence based on data completeness and peer count
-    const avgPeerCount = Object.values(metrics)
-      .filter(m => m && m.peerCount)
-      .reduce((sum: number, m: any) => sum + m.peerCount, 0) / dataPoints;
+    const peerCounts = Object.values(metrics)
+      .filter(m => m && typeof m === 'object' && 'peerCount' in m);
+    const avgPeerCount = peerCounts.length > 0 
+      ? peerCounts.reduce((sum, m) => sum + (m.peerCount || 0), 0) / peerCounts.length
+      : 0;
     
     const confidence = Math.min(
       (dataPoints / 5) * 50 + // 50% weight on data completeness
@@ -527,7 +529,7 @@ export class PeerComparisonEngine {
     }));
     
     if (relationships.length > 0) {
-      const { error } = await db.getClient()
+      const { error } = await (db as any).getClient()
         .from('stock_peer_groups')
         .upsert(relationships, {
           onConflict: 'symbol_id,peer_symbol_id,relationship_type'
@@ -551,7 +553,7 @@ export class PeerComparisonEngine {
   }>>> {
     try {
       // Get peer group
-      const { data: peers } = await db.getClient()
+      const { data: peers } = await (db as any).getClient()
         .from('stock_peer_groups')
         .select('peer_symbol_id')
         .eq('symbol_id', symbolId)
@@ -564,7 +566,7 @@ export class PeerComparisonEngine {
       const peerIds = peers.map(p => p.peer_symbol_id);
       
       // Get metric values for all peers
-      const { data: metrics } = await db.getClient()
+      const { data: metrics } = await (db as any).getClient()
         .from('stock_fundamentals')
         .select(`
           symbol_id,

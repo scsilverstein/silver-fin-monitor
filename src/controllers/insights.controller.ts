@@ -95,30 +95,44 @@ export class InsightsController {
   }
 
   /**
-   * Get prediction accuracy data from prediction_accuracy (or generate mock data)
+   * Get prediction accuracy data from prediction_comparisons table
    */
   private static async getAccuracyData(cutoffDate: Date) {
     try {
+      // Use prediction_comparisons table which exists in the schema
       const { data: accuracyRecords, error } = await supabase
-        .from('prediction_accuracy')
+        .from('prediction_comparisons')
         .select(`
           accuracy_score,
           prediction_id,
+          comparison_date,
           predictions!inner(
             prediction_type,
             time_horizon,
             confidence_level
           )
         `)
-        .gte('evaluation_date', cutoffDate.toISOString());
+        .gte('comparison_date', cutoffDate.toISOString());
 
       if (error) {
-        logger.warn('Prediction accuracy table not available, generating mock data:', error.message);
-        return this.generateMockAccuracyData();
+        logger.warn('Error fetching prediction comparisons:', error.message);
+        // Return empty data structure instead of mock data
+        return {
+          byType: [],
+          byHorizon: [],
+          overall: 0,
+          topPerformer: null
+        };
       }
 
       if (!accuracyRecords || accuracyRecords.length === 0) {
-        return this.generateMockAccuracyData();
+        // Return empty data structure instead of mock data
+        return {
+          byType: [],
+          byHorizon: [],
+          overall: 0,
+          topPerformer: null
+        };
       }
 
       // Group by prediction type
@@ -169,76 +183,18 @@ export class InsightsController {
 
       return { byType, byHorizon, overall, topPerformer };
     } catch (error) {
-      logger.warn('Failed to fetch accuracy data, using mock data:', error);
-      return this.generateMockAccuracyData();
+      logger.error('Failed to fetch accuracy data:', error);
+      // Return empty data structure instead of mock data
+      return {
+        byType: [],
+        byHorizon: [],
+        overall: 0,
+        topPerformer: null
+      };
     }
   }
 
-  /**
-   * Generate realistic mock accuracy data for demo purposes
-   */
-  private static generateMockAccuracyData() {
-    const byType = [
-      { category: 'market_direction', accuracy: 0.72, total: 15, correct: 11 },
-      { category: 'economic_indicator', accuracy: 0.78, total: 9, correct: 7 },
-      { category: 'geopolitical_event', accuracy: 0.45, total: 8, correct: 4 },
-      { category: 'cryptocurrency', accuracy: 0.38, total: 5, correct: 2 },
-      { category: 'sector_performance', accuracy: 0.65, total: 6, correct: 4 }
-    ];
 
-    const byHorizon = [
-      { category: '1_week', accuracy: 0.75, total: 12, correct: 9 },
-      { category: '1_month', accuracy: 0.68, total: 15, correct: 10 },
-      { category: '3_months', accuracy: 0.62, total: 13, correct: 8 },
-      { category: '6_months', accuracy: 0.55, total: 8, correct: 4 },
-      { category: '1_year', accuracy: 0.48, total: 5, correct: 2 }
-    ];
-
-    const overall = byType.reduce((sum, item) => sum + (item.accuracy * item.total), 0) / 
-                    byType.reduce((sum, item) => sum + item.total, 0);
-    
-    const topPerformer = byType.reduce((max, item) => 
-      item.accuracy > (max?.accuracy || 0) ? item : max, byType[0]);
-
-    return { byType, byHorizon, overall, topPerformer };
-  }
-
-  /**
-   * Generate realistic mock topic trends for demo purposes
-   */
-  private static generateMockTopicTrends() {
-    const topics = [
-      'market', 'bitcoin', 'crypto', 'earnings', 'economy', 'stock', 
-      'inflation', 'federalreserve', 'technology', 'ai', 'energy', 'healthcare'
-    ];
-
-    const now = new Date();
-    const generateDates = (count: number) => {
-      return Array.from({ length: count }, (_, i) => {
-        const date = new Date(now);
-        date.setDate(date.getDate() - (count - i));
-        return date.toISOString();
-      });
-    };
-
-    return topics.slice(0, 8).map((topic, index) => {
-      const baseCount = 25 - (index * 2); // Decreasing mentions for each topic
-      const dates = generateDates(baseCount);
-      const baseGrowth = 0.08 - (index * 0.01); // Decreasing growth rate
-      
-      return {
-        topic,
-        totalMentions: baseCount,
-        averageSentiment: 0.1 + (Math.random() - 0.5) * 0.4, // Random sentiment between -0.15 and 0.35
-        data: dates.map((date, dateIndex) => ({
-          date,
-          count: 1,
-          growth: baseGrowth + (Math.random() - 0.5) * 0.02 // Slight variation
-        })),
-        averageGrowth: baseGrowth
-      };
-    });
-  }
 
   /**
    * Get daily sentiment trends from processed content
@@ -302,13 +258,13 @@ export class InsightsController {
         .not('key_topics', 'is', null);
 
       if (error) {
-        logger.warn('Error fetching topic trends, using mock data:', error);
-        return this.generateMockTopicTrends();
+        logger.error('Error fetching topic trends:', error);
+        return [];
       }
 
       if (!contentData || contentData.length === 0) {
-        logger.info('No processed content available, generating mock topic trends');
-        return this.generateMockTopicTrends();
+        logger.info('No processed content available yet');
+        return [];
       }
 
       // Flatten and count topics
@@ -343,16 +299,43 @@ export class InsightsController {
             count: 1, // Individual mention
             growth: index > 0 ? 0.1 : 0 // Simple growth calculation
           })),
-          averageGrowth: data.count > 5 ? Math.random() * 0.3 - 0.1 : 0 // Mock growth for now
+          // Calculate average growth based on date distribution
+          averageGrowth: data.count > 5 ? this.calculateGrowthRate(data.dates) : 0
         }))
         .sort((a, b) => b.totalMentions - a.totalMentions)
         .slice(0, 10); // Top 10 topics
 
       return topicTrends;
     } catch (error) {
-      logger.warn('Failed to fetch topic trends, using mock data:', error);
-      return this.generateMockTopicTrends();
+      logger.error('Failed to fetch topic trends:', error);
+      return [];
     }
+  }
+
+  /**
+   * Calculate growth rate based on date distribution
+   */
+  private static calculateGrowthRate(dates: string[]): number {
+    if (dates.length < 2) return 0;
+    
+    // Sort dates
+    const sortedDates = dates.map(d => new Date(d).getTime()).sort((a, b) => a - b);
+    
+    // Calculate time span in days
+    const timeSpan = (sortedDates[sortedDates.length - 1] - sortedDates[0]) / (1000 * 60 * 60 * 24);
+    if (timeSpan === 0) return 0;
+    
+    // Count mentions in first half vs second half
+    const midPoint = sortedDates[0] + (sortedDates[sortedDates.length - 1] - sortedDates[0]) / 2;
+    const firstHalfCount = sortedDates.filter(d => d <= midPoint).length;
+    const secondHalfCount = sortedDates.filter(d => d > midPoint).length;
+    
+    // Calculate growth rate
+    if (firstHalfCount === 0) return 1; // All mentions in second half
+    const growthRate = (secondHalfCount - firstHalfCount) / firstHalfCount;
+    
+    // Cap between -0.1 and 0.3 to match original range
+    return Math.max(-0.1, Math.min(0.3, growthRate));
   }
 
   /**

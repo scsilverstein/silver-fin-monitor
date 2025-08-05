@@ -5,7 +5,7 @@ import { Request, Response, NextFunction } from 'express';
 import '@/middleware/auth';
 import { ApiError } from '@/types';
 import { createContextLogger } from '@/utils/logger';
-import { config } from '@/config';
+import config from '@/config';
 
 const errorLogger = createContextLogger('ErrorHandler');
 

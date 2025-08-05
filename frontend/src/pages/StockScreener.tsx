@@ -9,15 +9,15 @@ import {
 import { ModernCard, CardContent, CardHeader, CardTitle } from '@/components/ui/ModernCard';
 import { ModernButton } from '@/components/ui/ModernButton';
 import { Badge } from '@/components/ui/Badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/Input';
+import { Label } from '@/components/ui/Label';
 import { 
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from '@/components/ui/Select';
 import { 
   Table,
   TableBody,
@@ -53,10 +53,10 @@ interface StockData {
   currentRevenue: number;
   guidedRevenue: number | null;
   revenueGrowth: number;
-  eps: number;
+  eps: number | null;
   forwardEps: number | null;
-  priceToBook: number;
-  debtToEquity: number;
+  priceToBook: number | null;
+  debtToEquity: number | null;
   expectedGrowth: number;
   valueScore: number;
   isFavorite?: boolean;
@@ -132,6 +132,7 @@ export const StockScreener: React.FC = () => {
       // Calculate expected growth and value score for each stock
       return stocks.map((stock: any) => ({
         ...stock,
+        price: stock.price ?? 0,
         expectedGrowth: calculateExpectedGrowth(stock),
         valueScore: calculateValueScore(stock)
       }));
@@ -202,7 +203,7 @@ export const StockScreener: React.FC = () => {
     }
     
     // Positive expected growth
-    if (stock.expectedGrowth > 0) {
+    if (stock.expectedGrowth !== null && stock.expectedGrowth !== undefined && stock.expectedGrowth > 0) {
       score += Math.min(stock.expectedGrowth, 30); // Cap at 30 points
     }
     
@@ -261,13 +262,14 @@ export const StockScreener: React.FC = () => {
     }
   };
 
-  const formatCurrency = (value: number): string => {
+  const formatCurrency = (value: number | null | undefined): string => {
+    if (value === null || value === undefined) return 'N/A';
     if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
     if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
     return `$${value.toFixed(2)}`;
   };
 
-  const formatNumber = (value: number | null): string => {
+  const formatNumber = (value: number | null | undefined): string => {
     if (value === null || value === undefined) return 'N/A';
     return value.toFixed(2);
   };
@@ -279,13 +281,13 @@ export const StockScreener: React.FC = () => {
         stock.symbol,
         stock.name,
         stock.sector,
-        stock.price.toFixed(2),
+        formatCurrency(stock.price),
         formatNumber(stock.pe),
         formatNumber(stock.forwardPE),
         formatCurrency(stock.currentRevenue),
-        stock.guidedRevenue ? formatCurrency(stock.guidedRevenue) : 'N/A',
-        formatNumber(stock.expectedGrowth) + '%',
-        stock.valueScore.toFixed(1)
+        formatCurrency(stock.guidedRevenue),
+        stock.expectedGrowth !== null && stock.expectedGrowth !== undefined ? formatNumber(stock.expectedGrowth) + '%' : 'N/A',
+        stock.valueScore !== null && stock.valueScore !== undefined ? stock.valueScore.toFixed(1) : 'N/A'
       ])
     ].map(row => row.join(',')).join('\n');
 
@@ -575,7 +577,7 @@ export const StockScreener: React.FC = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      ${stock.price.toFixed(2)}
+                      {stock.price !== null && stock.price !== undefined ? `$${stock.price.toFixed(2)}` : 'N/A'}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {formatNumber(stock.pe)}
@@ -604,12 +606,12 @@ export const StockScreener: React.FC = () => {
                     <TableCell className="text-right">
                       <Badge 
                         variant={
-                          stock.valueScore >= 70 ? 'success' :
-                          stock.valueScore >= 50 ? 'warning' :
+                          stock.valueScore !== null && stock.valueScore !== undefined && stock.valueScore >= 70 ? 'success' :
+                          stock.valueScore !== null && stock.valueScore !== undefined && stock.valueScore >= 50 ? 'warning' :
                           'secondary'
                         }
                       >
-                        {stock.valueScore.toFixed(1)}
+                        {stock.valueScore !== null && stock.valueScore !== undefined ? stock.valueScore.toFixed(1) : 'N/A'}
                       </Badge>
                     </TableCell>
                   </TableRow>

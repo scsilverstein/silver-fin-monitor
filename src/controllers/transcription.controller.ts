@@ -1,9 +1,7 @@
 import { Request, Response } from 'express';
 import { netlifyWhisperService } from '../services/transcription/netlify-whisper.service';
-import { db } from '../services/database';
-import { Logger } from '../utils/stock-logger';
-
-const logger = new Logger('TranscriptionController');
+import { db } from '../services/database/index';
+import { logger } from '../utils/logger';
 
 export class TranscriptionController {
   /**
@@ -137,8 +135,7 @@ export class TranscriptionController {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - Number(days));
 
-      const { data: stats, error } = await db.getClient()
-        .from('raw_feeds')
+      const { data: stats, error } = await db.from('raw_feeds')
         .select('processing_status, metadata')
         .gte('created_at', startDate.toISOString())
         .not('metadata->audioUrl', 'is', null);

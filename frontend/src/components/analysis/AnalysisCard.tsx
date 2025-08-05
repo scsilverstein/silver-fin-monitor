@@ -2,9 +2,10 @@ import React from 'react';
 import { ModernCard, CardHeader, CardContent } from '@/components/ui/ModernCard';
 import { ModernBadge } from '@/components/ui/ModernBadge';
 import { ModernButton } from '@/components/ui/ModernButton';
-import { Calendar, TrendingUp, Shield, ChevronDown, ChevronUp, Eye, Clock, Zap } from 'lucide-react';
+import { Calendar, Shield, ChevronDown, ChevronUp, Eye, Clock, Zap } from 'lucide-react';
 import { DailyAnalysis } from '@/lib/api';
 import { format, formatDistanceToNow, differenceInHours } from 'date-fns';
+import { parseAnalysisDate, parseSafeDate } from '@/lib/utils';
 
 interface AnalysisCardProps {
   analysis: DailyAnalysis;
@@ -26,22 +27,33 @@ export const AnalysisCard: React.FC<AnalysisCardProps> = ({
   children
 }) => {
   const formatDate = (date: Date | string) => {
-    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    const dateObj = parseSafeDate(date);
+    if (!dateObj) return 'Invalid Date';
     return format(dateObj, 'MMMM d, yyyy');
   };
 
   const formatProcessedTime = (date: Date | string) => {
-    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    const dateObj = parseSafeDate(date);
+    if (!dateObj) return 'Invalid Time';
     return format(dateObj, 'MMM d, h:mm a');
   };
 
   const getTimeAgo = (date: Date | string) => {
-    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    const dateObj = parseSafeDate(date);
+    if (!dateObj) return 'unknown time';
     return formatDistanceToNow(dateObj, { addSuffix: true });
   };
 
   const getFreshnessInfo = (createdAt: Date | string) => {
-    const dateObj = typeof createdAt === 'string' ? new Date(createdAt) : createdAt;
+    const dateObj = parseSafeDate(createdAt);
+    if (!dateObj) {
+      return {
+        label: 'Unknown',
+        variant: 'outline' as const,
+        icon: <Clock className="h-3 w-3" />,
+        description: 'Unknown time'
+      };
+    }
     const hoursAgo = differenceInHours(new Date(), dateObj);
     
     if (hoursAgo <= 6) {
@@ -76,20 +88,23 @@ export const AnalysisCard: React.FC<AnalysisCardProps> = ({
   };
 
   return (
-    <ModernCard variant="elevated" className="hover:shadow-lg transition-shadow">
+    <ModernCard variant="default" className="hover:shadow-lg transition-shadow">
       <CardHeader>
         <div className="flex items-start justify-between">
           <div className="space-y-2">
             <div className="flex items-center gap-3">
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <h3 className="text-lg font-semibold">
-                {formatDate(analysis.analysis_date)}
+                {(() => {
+                  const date = parseAnalysisDate(analysis);
+                  return date ? formatDate(date) : 'Invalid Date';
+                })()}
               </h3>
-              <ModernBadge variant="outline" className={getSentimentColor(analysis.market_sentiment)}>
-                {analysis.market_sentiment}
+              <ModernBadge variant="outline" className={getSentimentColor(analysis.marketSentiment)}>
+                {analysis.marketSentiment}
               </ModernBadge>
-              {analysis.created_at && (() => {
-                const freshness = getFreshnessInfo(analysis.created_at);
+              {analysis.createdAt && (() => {
+                const freshness = getFreshnessInfo(analysis.createdAt);
                 return (
                   <ModernBadge 
                     variant={freshness.variant} 
@@ -105,24 +120,24 @@ export const AnalysisCard: React.FC<AnalysisCardProps> = ({
             
             <div className="flex items-center gap-4 text-sm">
               <div className="flex items-center gap-1">
-                <Shield className={`h-4 w-4 ${getConfidenceColor(analysis.confidence_score)}`} />
-                <span className={getConfidenceColor(analysis.confidence_score)}>
-                  {(analysis.confidence_score * 100).toFixed(0)}% confidence
+                <Shield className={`h-4 w-4 ${getConfidenceColor(analysis.confidenceScore)}`} />
+                <span className={getConfidenceColor(analysis.confidenceScore)}>
+                  {(analysis.confidenceScore * 100).toFixed(0)}% confidence
                 </span>
               </div>
               <span className="text-muted-foreground">
-                {analysis.sources_analyzed} sources analyzed
+                {analysis.sourcesAnalyzed} sources analyzed
               </span>
-              {analysis.created_at && (
+              {analysis.createdAt && (
                 <span className="text-muted-foreground">
-                  Processed {getTimeAgo(analysis.created_at)}
+                  Processed {getTimeAgo(analysis.createdAt)}
                 </span>
               )}
             </div>
             
-            {analysis.created_at && (
+            {analysis.createdAt && (
               <div className="text-xs text-muted-foreground">
-                Processed on {formatProcessedTime(analysis.created_at)}
+                Processed on {formatProcessedTime(analysis.createdAt)}
               </div>
             )}
           </div>
@@ -149,19 +164,19 @@ export const AnalysisCard: React.FC<AnalysisCardProps> = ({
       <CardContent>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground line-clamp-3">
-            {analysis.overall_summary}
+            {analysis.overallSummary}
           </p>
           
-          {analysis.key_themes && analysis.key_themes.length > 0 && (
+          {analysis.keyThemes && analysis.keyThemes.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {analysis.key_themes.slice(0, 5).map((theme, index) => (
+              {analysis.keyThemes.slice(0, 5).map((theme, index) => (
                 <ModernBadge key={index} variant="secondary" size="sm">
                   {theme}
                 </ModernBadge>
               ))}
-              {analysis.key_themes.length > 5 && (
+              {analysis.keyThemes.length > 5 && (
                 <ModernBadge variant="outline" size="sm">
-                  +{analysis.key_themes.length - 5} more
+                  +{analysis.keyThemes.length - 5} more
                 </ModernBadge>
               )}
             </div>

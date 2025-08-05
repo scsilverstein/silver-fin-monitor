@@ -10,7 +10,7 @@ interface FeedStatsProps {
 }
 
 export const FeedStats: React.FC<FeedStatsProps> = ({ feeds, stats }) => {
-  const activeFeeds = feeds.filter(f => f.isActive).length;
+  const activeFeeds = feeds.filter(f => f.is_active).length;
 
   return (
     <GridLayout columns={4} gap="md">

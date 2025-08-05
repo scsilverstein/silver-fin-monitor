@@ -21,6 +21,7 @@ interface QueueListProps {
   onJobDelete: (id: string) => void;
   onJobRetry: (id: string) => void;
   onJobCancel: (id: string) => void;
+  onJobReset?: (id: string) => void;
   onRetryAllFailed: () => void;
   onClearFailed: () => void;
   onPageChange: (page: number) => void;
@@ -36,6 +37,7 @@ export const QueueList: React.FC<QueueListProps> = ({
   onJobDelete,
   onJobRetry,
   onJobCancel,
+  onJobReset,
   onRetryAllFailed,
   onClearFailed,
   onPageChange
@@ -101,6 +103,7 @@ export const QueueList: React.FC<QueueListProps> = ({
                 onDelete={onJobDelete}
                 onRetry={onJobRetry}
                 onCancel={onJobCancel}
+                onReset={onJobReset}
               />
             ))}
           </div>

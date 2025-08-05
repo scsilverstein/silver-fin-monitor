@@ -20,6 +20,7 @@ interface QueueTabsProps {
   onJobDelete: (jobId: string) => void;
   onJobRetry: (jobId: string) => void;
   onJobCancel: (jobId: string) => void;
+  onJobReset?: (jobId: string) => void;
 }
 
 const getStatusIcon = (status: string) => {
@@ -41,7 +42,8 @@ export const QueueTabs: React.FC<QueueTabsProps> = ({
   getStatusBadgeColor,
   onJobDelete,
   onJobRetry,
-  onJobCancel
+  onJobCancel,
+  onJobReset
 }) => {
   const defaultTab = groupedJobs.find(g => g.jobs.length > 0)?.status || 'pending';
 
@@ -99,6 +101,7 @@ export const QueueTabs: React.FC<QueueTabsProps> = ({
                     onDelete={() => onJobDelete(job.id)}
                     onRetry={() => onJobRetry(job.id)}
                     onCancel={() => onJobCancel(job.id)}
+                    onReset={onJobReset ? () => onJobReset(job.id) : undefined}
                   />
                 ))}
               </div>

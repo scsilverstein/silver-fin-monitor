@@ -11,8 +11,9 @@ export const usePredictionsData = () => {
     try {
       setLoading(true);
       const data = await predictionsApi.list();
+      console.log('Loaded predictions data:', data);
       setPredictions(data || []);
-    } catch (error) {
+    } catch (error: any) {
       // Only log if it's not an auth issue
       if (!error.message?.includes('401')) {
         console.error('Failed to load predictions:', error);

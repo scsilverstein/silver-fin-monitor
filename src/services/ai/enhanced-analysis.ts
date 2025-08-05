@@ -4,7 +4,7 @@
  */
 
 import OpenAI from 'openai';
-import { supabase } from '../database/index.js';
+import { db } from '../database/index';
 import { logger } from '../../utils/logger.js';
 import {
   createAdvancedAnalysisPrompt,
@@ -180,7 +180,7 @@ export class EnhancedAnalysisService {
       return validatedAnalysis;
     } catch (error) {
       logger.error('Enhanced analysis generation failed', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
       throw error;
     }
@@ -224,7 +224,7 @@ export class EnhancedAnalysisService {
       return calibratedPrediction;
     } catch (error) {
       logger.error('Ensemble prediction generation failed', {
-        metadata: [{ error: error.message, timeHorizon }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error), timeHorizon }]
       });
       throw error;
     }
@@ -259,7 +259,7 @@ export class EnhancedAnalysisService {
       return swotAnalysis;
     } catch (error) {
       logger.error('SWOT analysis generation failed', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
       throw error;
     }
@@ -304,7 +304,7 @@ export class EnhancedAnalysisService {
       return scenarioAnalysis;
     } catch (error) {
       logger.error('Scenario analysis generation failed', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
       throw error;
     }
@@ -349,7 +349,7 @@ export class EnhancedAnalysisService {
       return evaluation;
     } catch (error) {
       logger.error('Prediction accuracy evaluation failed', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
       throw error;
     }
@@ -377,7 +377,7 @@ export class EnhancedAnalysisService {
       return completion.choices[0]?.message?.content || '';
     } catch (error) {
       logger.warn(`Model ${this.fallbackModels[this.currentModelIndex]} failed`, {
-        metadata: [{ error: error.message, retry_count: retryCount }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error), retry_count: retryCount }]
       });
 
       if (retryCount < maxRetries - 1) {
@@ -493,7 +493,7 @@ export class EnhancedAnalysisService {
     context: AnalysisContext
   ): Promise<void> {
     try {
-      await supabase
+      await db
         .from('reasoning_chains')
         .insert({
           analysis_date: new Date().toISOString().split('T')[0],
@@ -506,7 +506,7 @@ export class EnhancedAnalysisService {
         });
     } catch (error) {
       logger.error('Failed to store reasoning chain', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
     }
   }
@@ -516,7 +516,7 @@ export class EnhancedAnalysisService {
    */
   private async getHistoricalPredictions(timeHorizon: string): Promise<any[]> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('predictions')
         .select('*')
         .eq('time_horizon', timeHorizon)
@@ -527,7 +527,7 @@ export class EnhancedAnalysisService {
       return data || [];
     } catch (error) {
       logger.error('Failed to get historical predictions', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
       return [];
     }
@@ -541,7 +541,7 @@ export class EnhancedAnalysisService {
   ): Promise<EnsemblePrediction> {
     try {
       // Get methodology performance weights from meta-learning database
-      const { data: weights } = await supabase
+      const { data: weights } = await db
         .from('methodology_weights')
         .select('*')
         .order('updated_at', { ascending: false })
@@ -574,7 +574,7 @@ export class EnhancedAnalysisService {
       return prediction;
     } catch (error) {
       logger.error('Meta-learning calibration failed', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
       return prediction;
     }
@@ -588,7 +588,7 @@ export class EnhancedAnalysisService {
     analysis: EnhancedAnalysisResult
   ): Promise<void> {
     try {
-      await supabase
+      await db
         .from('prediction_evaluations')
         .insert({
           prediction_data: prediction,
@@ -599,7 +599,7 @@ export class EnhancedAnalysisService {
         });
     } catch (error) {
       logger.error('Failed to store prediction for evaluation', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
     }
   }
@@ -609,7 +609,7 @@ export class EnhancedAnalysisService {
    */
   private async updateMetaLearningDatabase(evaluation: AccuracyEvaluation): Promise<void> {
     try {
-      await supabase
+      await db
         .from('meta_learning_insights')
         .insert({
           accuracy_scores: evaluation.accuracy_scores,
@@ -622,7 +622,7 @@ export class EnhancedAnalysisService {
         });
     } catch (error) {
       logger.error('Failed to update meta-learning database', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
     }
   }
@@ -632,7 +632,7 @@ export class EnhancedAnalysisService {
    */
   private async updateMethodologyWeights(adjustments: any): Promise<void> {
     try {
-      await supabase
+      await db
         .from('methodology_weights')
         .insert({
           weights: adjustments.methodology_weight_changes,
@@ -643,7 +643,7 @@ export class EnhancedAnalysisService {
         });
     } catch (error) {
       logger.error('Failed to update methodology weights', {
-        metadata: [{ error: error.message }]
+        metadata: [{ error: error instanceof Error ? error.message : String(error) }]
       });
     }
   }

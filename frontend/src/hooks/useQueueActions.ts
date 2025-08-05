@@ -90,6 +90,16 @@ export const useQueueActions = (refreshData: () => void) => {
     }
   };
 
+  const handleJobReset = async (id: string) => {
+    try {
+      await queueApi.resetJob(id);
+      toast.success('Job reset successfully');
+      refreshData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Failed to reset job');
+    }
+  };
+
   return {
     handlePauseResume,
     handleClearCompleted,
@@ -98,6 +108,7 @@ export const useQueueActions = (refreshData: () => void) => {
     handleAddJob,
     handleJobDelete,
     handleJobRetry,
-    handleJobCancel
+    handleJobCancel,
+    handleJobReset
   };
 };

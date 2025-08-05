@@ -104,7 +104,7 @@ export const AnalysisOverlay: React.FC = () => {
       sentiment: analysis.market_sentiment === 'bullish' ? 1 : 
                  analysis.market_sentiment === 'bearish' ? -1 : 0,
       confidence: analysis.confidence_score || 0,
-      volatility: Math.random() * 0.5, // TODO: Calculate from actual data
+      volatility: analysis.ai_analysis?.volatility || 0, // Use actual volatility from analysis
       sources: analysis.sources_analyzed || 0
     }));
   }, [analysisData]);
@@ -116,8 +116,8 @@ export const AnalysisOverlay: React.FC = () => {
       date: item.analysis_date,
       sentiment: item.market_sentiment,
       confidence: item.confidence_score,
-      summary: item.overall_summary.replace(/\n/g, ' '),
-      themes: item.key_themes.join(', ')
+      summary: item.overall_summary ? item.overall_summary.replace(/\n/g, ' ') : '',
+      themes: item.key_themes ? item.key_themes.join(', ') : ''
     }));
 
     const csv = [

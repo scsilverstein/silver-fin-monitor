@@ -103,7 +103,7 @@ export class SecEarningsService {
         throw new Error(`SEC API error: ${response.status}`);
       }
 
-      const data: SecCompanyData = await response.json();
+      const data = await response.json() as SecCompanyData;
       const filings = data.filings.recent;
       
       if (!filings) {
@@ -176,7 +176,7 @@ export class SecEarningsService {
         headers: { 'User-Agent': this.userAgent }
       });
 
-      const data: SecCompanyData = await response.json();
+      const data = await response.json() as SecCompanyData;
       const filings = data.filings.recent;
 
       // Find the specific filing
@@ -241,7 +241,7 @@ export class SecEarningsService {
     documentUrl: string,
     textContent: string
   ): Promise<string> {
-    const result = await this.db.query(`
+    const result = await (this.db as any).query(`
       INSERT INTO earnings_reports (
         earnings_calendar_id, filing_type, filing_date, accession_number,
         cik, document_url, document_text, processing_status
@@ -314,7 +314,7 @@ export class SecEarningsService {
    * Store earnings calendar entry
    */
   private async storeEarningsCalendar(earning: EarningsCalendar): Promise<void> {
-    await this.db.query(`
+    await (this.db as any).query(`
       INSERT INTO earnings_calendar (
         symbol, company_name, earnings_date, time_of_day, fiscal_quarter, fiscal_year,
         confirmed, status, data_source, external_id, last_updated
@@ -345,7 +345,7 @@ export class SecEarningsService {
    * Get earnings calendar ID for linking reports
    */
   private async getEarningsCalendarId(symbol: string, earningsDate: string): Promise<string | null> {
-    const result = await this.db.query(
+    const result = await (this.db as any).query(
       'SELECT id FROM earnings_calendar WHERE symbol = $1 AND earnings_date = $2 LIMIT 1',
       [symbol, earningsDate]
     );

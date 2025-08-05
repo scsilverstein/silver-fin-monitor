@@ -164,14 +164,14 @@ export const Feeds: React.FC = () => {
                     <Rss className="h-5 w-5 text-muted-foreground" />
                     <h3 className="text-lg font-medium">{feed.name}</h3>
                     <ModernBadge className={getTypeColor(feed.type)}>{feed.type}</ModernBadge>
-                    <ModernBadge variant={feed.isActive ? 'success' : 'secondary' as any}>
-                      {feed.isActive ? 'Active' : 'Inactive'}
+                    <ModernBadge variant={feed.is_active ? 'success' : 'secondary' as any}>
+                      {feed.is_active ? 'Active' : 'Inactive'}
                     </ModernBadge>
                   </div>
                   <p className="text-sm text-muted-foreground">{feed.url}</p>
-                  {feed.lastProcessedAt && (
+                  {feed.last_processed_at && (
                     <p className="text-xs text-muted-foreground">
-                      Last processed: {formatDate(feed.lastProcessedAt)}
+                      Last processed: {formatDate(feed.last_processed_at)}
                     </p>
                   )}
                 </div>
@@ -190,11 +190,11 @@ export const Feeds: React.FC = () => {
                     onClick={() =>
                       updateMutation.mutate({
                         id: feed.id,
-                        data: { isActive: !feed.isActive }
+                        data: { is_active: !feed.is_active }
                       })
                     }
                   >
-                    {feed.isActive ? (
+                    {feed.is_active ? (
                       <Pause className="h-4 w-4" />
                     ) : (
                       <Play className="h-4 w-4" />
