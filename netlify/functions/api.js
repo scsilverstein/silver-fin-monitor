@@ -15392,89 +15392,6 @@ var triggerQueueWorker = async () => {
     console.warn("Failed to trigger queue worker:", error);
   }
 };
-var triggerAutoProcessing = async (dataType) => {
-  try {
-    if (!supabase) return;
-    let needsProcessing = false;
-    const now = /* @__PURE__ */ new Date();
-    switch (dataType) {
-      case "feeds":
-        const { data: recentFeed } = await supabase.from("feed_sources").select("last_processed_at").eq("is_active", true).order("last_processed_at", { ascending: false }).limit(1).single();
-        const feedAge = recentFeed?.last_processed_at ? now.getTime() - new Date(recentFeed.last_processed_at).getTime() : Infinity;
-        if (feedAge > 4 * 60 * 60 * 1e3) {
-          needsProcessing = true;
-          const { data: feedSources } = await supabase.from("feed_sources").select("id").eq("is_active", true);
-          if (feedSources) {
-            for (const source of feedSources.slice(0, 5)) {
-              await supabase.from("job_queue").insert({
-                job_type: "feed_fetch",
-                payload: { sourceId: source.id },
-                priority: 1,
-                status: "pending",
-                created_at: now.toISOString()
-              });
-            }
-            console.log(`\u{1F680} Queued ${feedSources.slice(0, 5).length} feed_fetch jobs`);
-          }
-        }
-        break;
-      case "earnings":
-        const { data: recentEarnings } = await supabase.from("earnings_calendar").select("last_updated").order("last_updated", { ascending: false }).limit(1).single();
-        const earningsAge = recentEarnings?.last_updated ? now.getTime() - new Date(recentEarnings.last_updated).getTime() : Infinity;
-        if (earningsAge > 24 * 60 * 60 * 1e3) {
-          needsProcessing = true;
-          await supabase.from("job_queue").insert({
-            job_type: "earnings_refresh",
-            payload: { source: "auto-trigger", timestamp: now.toISOString() },
-            priority: 2,
-            status: "pending",
-            created_at: now.toISOString()
-          });
-          console.log("\u{1F680} Queued earnings_refresh job");
-        }
-        break;
-      case "analysis":
-        const today = now.toISOString().split("T")[0];
-        const { data: todayAnalysis } = await supabase.from("daily_analysis").select("created_at").eq("analysis_date", today).single();
-        const analysisAge = todayAnalysis?.created_at ? now.getTime() - new Date(todayAnalysis.created_at).getTime() : Infinity;
-        if (analysisAge > 12 * 60 * 60 * 1e3 || !todayAnalysis) {
-          needsProcessing = true;
-          await supabase.from("job_queue").insert({
-            job_type: "daily_analysis",
-            payload: { date: today, force: !todayAnalysis },
-            priority: 1,
-            status: "pending",
-            created_at: now.toISOString()
-          });
-          console.log("\u{1F680} Queued daily_analysis job");
-        }
-        break;
-      case "predictions":
-        const { data: recentPrediction } = await supabase.from("predictions").select("created_at").order("created_at", { ascending: false }).limit(1).single();
-        const predictionAge = recentPrediction?.created_at ? now.getTime() - new Date(recentPrediction.created_at).getTime() : Infinity;
-        if (predictionAge > 6 * 60 * 60 * 1e3) {
-          needsProcessing = true;
-          const { data: latestAnalysis } = await supabase.from("daily_analysis").select("id, analysis_date").order("analysis_date", { ascending: false }).limit(1).single();
-          if (latestAnalysis) {
-            await supabase.from("job_queue").insert({
-              job_type: "generate_predictions",
-              payload: {
-                analysisId: latestAnalysis.id,
-                analysisDate: latestAnalysis.analysis_date
-              },
-              priority: 1,
-              status: "pending",
-              created_at: now.toISOString()
-            });
-            console.log("\u{1F680} Queued generate_predictions job");
-          }
-        }
-        break;
-    }
-  } catch (error) {
-    console.warn(`Failed to trigger auto-processing for ${dataType}:`, error);
-  }
-};
 var createResponse = (statusCode, body) => ({
   statusCode,
   headers: {
@@ -15759,7 +15676,6 @@ var handleRoute = async (event) => {
     }
     if (httpMethod === "GET") {
       try {
-        triggerAutoProcessing("feeds");
         triggerQueueWorker();
         const { data: feeds, error } = await supabase.from("feed_sources").select("*").order("created_at", { ascending: false });
         if (error) throw error;
@@ -15803,8 +15719,6 @@ var handleRoute = async (event) => {
     }
   }
   if (apiPath.includes("/dashboard/overview") || apiPath === "/api/v1/dashboard/overview") {
-    triggerAutoProcessing("analysis");
-    triggerAutoProcessing("predictions");
     triggerQueueWorker();
     const authHeader = headers.authorization || headers.Authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -16689,7 +16603,6 @@ var handleRoute = async (event) => {
     const year = pathParts[pathParts.length - 2];
     const month = pathParts[pathParts.length - 1];
     try {
-      triggerAutoProcessing("earnings");
       triggerQueueWorker();
       const startDate = `${year}-${month.padStart(2, "0")}-01`;
       const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();

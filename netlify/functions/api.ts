@@ -643,9 +643,6 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     // Handle GET requests to list all feeds
     if (httpMethod === 'GET') {
       try {
-        // 🚀 TRIGGER AUTO-PROCESSING: Check if feeds need refreshing
-        triggerAutoProcessing('feeds');
-        
         // 🔧 TRIGGER QUEUE WORKER: Process any pending jobs
         triggerQueueWorker();
         
@@ -708,10 +705,6 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
   
   // Dashboard overview - REAL DATA
   if (apiPath.includes('/dashboard/overview') || apiPath === '/api/v1/dashboard/overview') {
-    // 🚀 TRIGGER AUTO-PROCESSING: Check if analysis and predictions need refreshing
-    triggerAutoProcessing('analysis');
-    triggerAutoProcessing('predictions');
-    
     // 🔧 TRIGGER QUEUE WORKER: Process any pending jobs
     triggerQueueWorker();
     
@@ -1965,9 +1958,6 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     const month = pathParts[pathParts.length - 1];
     
     try {
-      // 🚀 TRIGGER AUTO-PROCESSING: Check if earnings need refreshing
-      triggerAutoProcessing('earnings');
-      
       // 🔧 TRIGGER QUEUE WORKER: Process any pending jobs
       triggerQueueWorker();
       
