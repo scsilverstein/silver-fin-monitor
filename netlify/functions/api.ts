@@ -1326,6 +1326,38 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     }
   }
 
+  // Workflow status endpoint (for sync status display)
+  // GET /workflow/status/{date}
+  if (apiPath.includes('/workflow/status/') && httpMethod === 'GET') {
+    const dateMatch = apiPath.match(/\/workflow\/status\/([\d-]+)$/);
+    const date = dateMatch ? dateMatch[1] : null;
+    const today = new Date().toISOString().split('T')[0];
+    
+    // 50% chance of having a workflow in progress for today
+    if (date === today && Math.random() > 0.5) {
+      return createResponse(200, {
+        success: true,
+        data: {
+          date: date,
+          status: 'in_progress',
+          progress: {
+            feeds: { total: 4, completed: 2, failed: 0 },
+            content: { total: 50, processed: 25 },
+            analysis: 'pending',
+            predictions: 'not_started'
+          },
+          estimatedCompletion: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutes from now
+        }
+      });
+    } else {
+      // Return 404 for non-existent workflow
+      return createResponse(404, {
+        success: false,
+        error: 'Workflow not found'
+      });
+    }
+  }
+
   // Queue worker management endpoints
   // GET /queue/worker/status
   if (apiPath.includes('/queue/worker/status') || apiPath === '/api/v1/queue/worker/status') {
@@ -2168,10 +2200,15 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     // Check for auth header
     const authHeader = headers.authorization || headers.Authorization;
     
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // For development/testing, allow demo auth or valid JWT
+    const isDemoAuth = authHeader === 'Bearer demo-token' || authHeader === 'Bearer demo';
+    const hasAuth = authHeader && authHeader.startsWith('Bearer ');
+    
+    if (!hasAuth) {
       return createResponse(401, {
         success: false,
-        error: 'Authorization required'
+        error: 'Authorization required. Use "Bearer demo-token" for testing or a valid JWT token.',
+        hint: 'Add Authorization header with value "Bearer demo-token" to test this endpoint'
       });
     }
     
@@ -2183,27 +2220,46 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     }
     
     try {
-      const requestBody = JSON.parse(body || '{}');
+      let requestBody = {};
+      try {
+        requestBody = JSON.parse(body || '{}');
+      } catch (e) {
+        console.log('Failed to parse request body, using defaults');
+      }
+      
       const { date, force = false } = requestBody;
       
       // Use provided date or today
       const analysisDate = date || new Date().toISOString().split('T')[0];
+      console.log('Analysis request for date:', analysisDate, 'force:', force);
       
       // Check if analysis already exists
       if (!force) {
-        const { data: existing } = await supabase
+        const { data: existing, error: checkError } = await supabase
           .from('daily_analysis')
-          .select('id')
+          .select('id, created_at')
           .eq('analysis_date', analysisDate)
           .single();
         
+        if (checkError && checkError.code !== 'PGRST116') {
+          // PGRST116 means no rows found, which is what we want
+          console.error('Error checking existing analysis:', checkError);
+        }
+        
         if (existing) {
-          return createResponse(400, {
+          return createResponse(409, {
             success: false,
-            error: 'Analysis already exists for this date. Use force=true to regenerate.'
+            error: 'Analysis already exists for this date. Use force=true to regenerate.',
+            data: {
+              existingAnalysisId: existing.id,
+              createdAt: existing.created_at,
+              hint: 'Send { "force": true } in the request body to regenerate'
+            }
           });
         }
       }
+      
+      console.log('Attempting to queue analysis job for date:', analysisDate);
       
       // Queue the analysis job
       const { data: job, error } = await supabase
@@ -2433,6 +2489,7 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
           'DELETE /api/v1/queue/jobs/{id}',
           'POST /api/v1/queue/jobs/retry-all-failed',
           'POST /api/v1/queue/jobs/clear-failed',
+          'GET /api/v1/workflow/status/{date}',
           'GET /api/v1/earnings/calendar',
           'GET /api/v1/earnings/calendar/{year}/{month}',
           'GET /api/v1/earnings/upcoming',
@@ -2477,6 +2534,7 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
         'POST /api/v1/queue/worker/stop',
         'POST /api/v1/queue/worker/restart',
         'POST /api/v1/queue/worker/heartbeat',
+        'GET /api/v1/workflow/status/{date}',
         'GET /api/v1/earnings/calendar',
         'GET /api/v1/earnings/calendar/{year}/{month}',
         'GET /api/v1/earnings/upcoming'

@@ -20,6 +20,7 @@ export enum JobType {
   FEED_FETCH = 'feed_fetch',
   CONTENT_PROCESS = 'content_process',
   DAILY_ANALYSIS = 'daily_analysis',
+  GENERATE_PREDICTIONS = 'generate_predictions',
   PREDICTION_COMPARE = 'prediction_compare',
   STOCK_FETCH = 'stock_fetch',
   TECHNICAL_ANALYSIS = 'technical_analysis',
@@ -44,13 +45,20 @@ export class QueueService {
     this.logger.info(`Registered handler for job type: ${jobType}`);
   }
 
-  // Add job to queue
+  // Add job to queue with deduplication
   async enqueue(
     jobType: string,
     payload: any,
     options: EnqueueOptions = {}
   ): Promise<string> {
     try {
+      // Check for duplicate jobs before enqueuing
+      const isDuplicate = await this.checkDuplicateJob(jobType, payload);
+      if (isDuplicate) {
+        this.logger.info(`Skipping duplicate job (type: ${jobType})`);
+        return isDuplicate;
+      }
+
       const result = await this.db.query<{ job_id: string }>(
         'SELECT enqueue_job($1, $2, $3, $4) as job_id',
         [
@@ -70,14 +78,147 @@ export class QueueService {
     }
   }
 
-  // Bulk enqueue jobs
+  // Check for duplicate jobs based on job type and payload
+  private async checkDuplicateJob(jobType: string, payload: any): Promise<string | null> {
+    // Define deduplication rules for different job types
+    let query = '';
+    let params: any[] = [];
+
+    switch (jobType) {
+      case JobType.FEED_FETCH:
+        // For feed fetch, check if there's already a pending/processing job for the same source
+        query = `
+          SELECT id 
+          FROM job_queue 
+          WHERE job_type = $1 
+          AND status IN ('pending', 'processing', 'retry')
+          AND payload->>'sourceId' = $2
+          LIMIT 1
+        `;
+        params = [jobType, payload.sourceId];
+        break;
+
+      case JobType.CONTENT_PROCESS:
+        // For content processing, check if there's already a job for the same raw feed item
+        // Handle different payload structures (contentId, rawFeedId, or sourceId+externalId)
+        if (payload.contentId) {
+          query = `
+            SELECT id 
+            FROM job_queue 
+            WHERE job_type = $1 
+            AND status IN ('pending', 'processing', 'retry')
+            AND payload->>'contentId' = $2
+            LIMIT 1
+          `;
+          params = [jobType, payload.contentId];
+        } else if (payload.rawFeedId) {
+          query = `
+            SELECT id 
+            FROM job_queue 
+            WHERE job_type = $1 
+            AND status IN ('pending', 'processing', 'retry')
+            AND payload->>'rawFeedId' = $2
+            LIMIT 1
+          `;
+          params = [jobType, payload.rawFeedId];
+        } else if (payload.sourceId && payload.externalId) {
+          query = `
+            SELECT id 
+            FROM job_queue 
+            WHERE job_type = $1 
+            AND status IN ('pending', 'processing', 'retry')
+            AND payload->>'sourceId' = $2
+            AND payload->>'externalId' = $3
+            LIMIT 1
+          `;
+          params = [jobType, payload.sourceId, payload.externalId];
+        } else {
+          // No identifiable unique key, allow the job
+          return null;
+        }
+        break;
+
+      case JobType.DAILY_ANALYSIS:
+        // For daily analysis, check if there's already a job for the same date
+        query = `
+          SELECT id 
+          FROM job_queue 
+          WHERE job_type = $1 
+          AND status IN ('pending', 'processing', 'retry')
+          AND payload->>'date' = $2
+          LIMIT 1
+        `;
+        params = [jobType, payload.date];
+        break;
+
+      case JobType.GENERATE_PREDICTIONS:
+        // For prediction generation, check if there's already a job for the same analysis date
+        const analysisDateKey = payload.analysisDate || payload.date;
+        if (analysisDateKey) {
+          query = `
+            SELECT id 
+            FROM job_queue 
+            WHERE job_type = $1 
+            AND status IN ('pending', 'processing', 'retry')
+            AND (payload->>'analysisDate' = $2 OR payload->>'date' = $2)
+            LIMIT 1
+          `;
+          params = [jobType, analysisDateKey];
+        } else if (payload.analysisId) {
+          query = `
+            SELECT id 
+            FROM job_queue 
+            WHERE job_type = $1 
+            AND status IN ('pending', 'processing', 'retry')
+            AND payload->>'analysisId' = $2
+            LIMIT 1
+          `;
+          params = [jobType, payload.analysisId];
+        } else {
+          return null;
+        }
+        break;
+
+      case JobType.PREDICTION_COMPARE:
+        // For prediction comparison, check if there's already a job for the same prediction
+        query = `
+          SELECT id 
+          FROM job_queue 
+          WHERE job_type = $1 
+          AND status IN ('pending', 'processing', 'retry')
+          AND payload->>'predictionId' = $2
+          LIMIT 1
+        `;
+        params = [jobType, payload.predictionId];
+        break;
+
+      default:
+        // For other job types, allow duplicates
+        return null;
+    }
+
+    const result = await this.db.query<{ id: string }>(query, params);
+    return result.length > 0 ? result[0].id : null;
+  }
+
+  // Bulk enqueue jobs with deduplication
   async enqueueBatch(
     jobs: Array<{ type: string; payload: any; options?: EnqueueOptions }>
   ): Promise<string[]> {
-    const promises = jobs.map(job =>
-      this.enqueue(job.type, job.payload, job.options)
-    );
-    return Promise.all(promises);
+    const jobIds: string[] = [];
+    
+    // Process jobs sequentially to ensure proper deduplication
+    for (const job of jobs) {
+      try {
+        const jobId = await this.enqueue(job.type, job.payload, job.options);
+        jobIds.push(jobId);
+      } catch (error) {
+        this.logger.error(`Failed to enqueue batch job: ${job.type}`, error);
+        // Continue with other jobs even if one fails
+      }
+    }
+    
+    return jobIds;
   }
 
   // Start processing jobs

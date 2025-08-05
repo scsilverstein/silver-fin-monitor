@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { cn } from '@/lib/utils';
+import { cn } from '../../lib/utils';
 import {
   Search,
   Bell,
@@ -12,11 +12,12 @@ import {
   Keyboard
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { ThemeToggle } from '@/components/ui/ThemeToggle';
-import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { useToast } from '@/contexts/ToastContext';
-import { CommandPalette } from '@/components/ui/CommandPalette';
-import { PWAStatus } from '@/components/ui/PWAStatus';
+import { ThemeToggle } from '../ui/ThemeToggle';
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import { useToast } from '../../contexts/ToastContext';
+import { CommandPalette } from '../ui/CommandPalette';
+import { PWAStatus } from '../ui/PWAStatus';
+import { SyncStatusIndicator } from '../sync/SyncStatusIndicator';
 
 interface Notification {
   id: string;
@@ -135,6 +136,9 @@ export const ModernHeader: React.FC = () => {
             >
               <Keyboard className="h-5 w-5" />
             </button>
+
+            {/* Sync Status */}
+            <SyncStatusIndicator />
 
             {/* PWA Status */}
             <PWAStatus />

@@ -2,13 +2,26 @@
 import { Request, Response } from 'express';
 import { db } from '@/services/database/index';
 import { cache, cacheKeys, cacheTtl } from '@/services/cache/index';
-import { queueService } from '@/services/database/queue';
+import QueueService, { JobType } from '@/services/queue/queue.service';
+import { DatabaseService } from '@/services/database/db.service';
 import { FeedSource, CreateFeedSourceData, UpdateFeedSourceData, ApiResponse, FeedConfig } from '@/types';
 import { asyncHandler } from '@/middleware/error';
 import { NotFoundError, ConflictError } from '@/middleware/error';
 import { createContextLogger } from '@/utils/logger';
+import winston from 'winston';
 
 const feedLogger = createContextLogger('FeedController');
+
+// Create queue service instance with deduplication
+const dbService = new DatabaseService(
+  { 
+    url: process.env.SUPABASE_URL || '', 
+    anonKey: process.env.SUPABASE_ANON_KEY || '',
+    serviceKey: process.env.SUPABASE_SERVICE_KEY || ''
+  },
+  feedLogger as winston.Logger
+);
+const queueService = new QueueService(dbService, feedLogger as winston.Logger);
 
 export class FeedController {
   // Transform database row to FeedSource interface
@@ -233,7 +246,7 @@ export class FeedController {
       // Queue initial fetch
       try {
         feedLogger.info('Queueing initial fetch job', { sourceId: transformedFeed.id });
-        await queueService.enqueue('feed_fetch', { sourceId: transformedFeed.id }, 1);
+        await queueService.enqueue(JobType.FEED_FETCH, { sourceId: transformedFeed.id }, { priority: 1 });
         feedLogger.info('Queue job created successfully');
       } catch (queueError) {
         feedLogger.error('Failed to queue initial fetch job', queueError);
@@ -367,7 +380,7 @@ export class FeedController {
     }
 
     // Queue processing job
-    const jobId = await queueService.enqueue('feed_fetch', { sourceId: id! }, 2);
+    const jobId = await queueService.enqueue(JobType.FEED_FETCH, { sourceId: id! }, { priority: 2 });
 
     feedLogger.info('Feed processing queued', { id, jobId });
 
@@ -546,22 +559,22 @@ export class FeedController {
         feedId: itemId,
         audioUrl: item.metadata?.audioUrl || item.metadata?.audio_url,
         title: item.title
-      }, 1); // High priority for manual processing
+      }, { priority: 1 }); // High priority for manual processing
     } else if (isAudioContent && hasTranscript) {
       // Audio content with transcript - process the content
       feedLogger.info('Processing transcribed audio content', { feedId: id, itemId });
-      jobId = await queueService.enqueue('content_process', {
+      jobId = await queueService.enqueue(JobType.CONTENT_PROCESS, {
         rawFeedId: itemId,
         sourceId: id!,
         priority: 'manual' // Mark as manually triggered
-      }, 1); // High priority for manual processing
+      }, { priority: 1 }); // High priority for manual processing
     } else {
       // Queue regular content processing job
-      jobId = await queueService.enqueue('content_process', {
+      jobId = await queueService.enqueue(JobType.CONTENT_PROCESS, {
         rawFeedId: itemId,
         sourceId: id!,
         priority: 'manual' // Mark as manually triggered
-      }, 1); // High priority for manual processing
+      }, { priority: 1 }); // High priority for manual processing
     }
 
     feedLogger.info('Feed item processing queued', { feedId: id, itemId, jobId });
@@ -600,12 +613,12 @@ export class FeedController {
       // Queue fetch jobs for each source with historical flag
       let jobsQueued = 0;
       for (const source of sources) {
-        const jobId = await queueService.enqueue('feed_fetch', {
+        const jobId = await queueService.enqueue(JobType.FEED_FETCH, {
           sourceId: source.id,
           historical: true,
           daysBack,
           forceRefetch
-        }, 1); // High priority
+        }, { priority: 1 }); // High priority
         
         if (jobId) {
           jobsQueued++;
@@ -619,10 +632,10 @@ export class FeedController {
           const analysisDate = new Date();
           analysisDate.setDate(analysisDate.getDate() - i);
           
-          await queueService.enqueue('daily_analysis', {
+          await queueService.enqueue(JobType.DAILY_ANALYSIS, {
             date: analysisDate,
             forceRegenerate: true
-          }, 2); // Medium priority
+          }, { priority: 2 }); // Medium priority
         }
       }
       

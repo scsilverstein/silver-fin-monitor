@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { websocketService, WebSocketEvent } from '@/services/websocket.service';
-import { useAuthStore } from '@/store/auth.store';
+import { websocketService, WebSocketEvent } from '../services/websocket.service';
+import { useAuthStore } from '../store/auth.store';
 
 export interface UseWebSocketOptions {
   autoConnect?: boolean;

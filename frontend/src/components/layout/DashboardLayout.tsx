@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, useAppStore } from '../../store';
-import { Button } from '../ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '../ui/Button';
+import { cn } from '../../lib/utils';
 import { 
   Menu,
   X,
@@ -21,6 +21,7 @@ import {
   Users,
   AlertCircle
 } from 'lucide-react';
+import { SyncStatusIndicator } from '../sync/SyncStatusIndicator';
 
 export const DashboardLayout: React.FC = () => {
   const location = useLocation();
@@ -211,7 +212,8 @@ export const DashboardLayout: React.FC = () => {
 
           <div className="flex-1" />
 
-          {/* You can add more header items here */}
+          {/* Sync Status Indicator */}
+          <SyncStatusIndicator />
         </header>
 
         {/* Page content */}

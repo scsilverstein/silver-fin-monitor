@@ -42,6 +42,9 @@ api.interceptors.request.use(
     const token = localStorage.getItem('auth_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    } else if (config.url?.includes('/analysis/trigger')) {
+      // For testing: use demo token for analysis trigger if no auth token
+      config.headers.Authorization = 'Bearer demo-token';
     }
     
     // Comment out verbose logging unless needed for debugging

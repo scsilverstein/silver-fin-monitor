@@ -227,7 +227,7 @@ export class QueueController {
     const { 
       status, 
       jobType,
-      limit = 20, 
+      limit = 1000, 
       offset = 0 
     } = req.query;
     

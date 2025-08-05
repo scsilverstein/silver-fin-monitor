@@ -1,4 +1,3 @@
-import { queueService } from '../database/queue';
 import { processFeed } from '../feeds/processor';
 import { contentProcessor } from '../content/processor';
 import { aiAnalysisService } from '../ai/analysis';
@@ -11,6 +10,7 @@ import { DatabaseService } from '../database/db.service';
 import { CacheService } from '../cache/cache.service';
 import { OpenAIService } from '../ai/openai.service';
 import winston from 'winston';
+import QueueService, { JobType } from '../queue/queue.service';
 
 // Create services with dependencies
 const dbService = new DatabaseService(
@@ -27,6 +27,9 @@ const openaiService = new OpenAIService(
   cacheService,
   logger as winston.Logger
 );
+
+// Create queue service instance with deduplication
+const queueService = new QueueService(dbService, logger as winston.Logger);
 
 const predictionComparisonService = new PredictionComparisonService(
   dbService,
@@ -508,7 +511,7 @@ export class QueueWorker {
 
       if (sources) {
         for (const source of sources) {
-          await queueService.enqueue('feed_fetch', { sourceId: source.id }, 5);
+          await queueService.enqueue(JobType.FEED_FETCH, { sourceId: source.id }, { priority: 5 });
         }
       }
     });
@@ -519,17 +522,15 @@ export class QueueWorker {
       const currentDate = new Date();
       
       // Queue analysis with current timestamp to ensure uniqueness
-      await queueService.enqueue('daily_analysis', { 
-        date: currentDate,
-        timestamp: currentDate.getTime() // Add timestamp for uniqueness
-      }, 1);
+      await queueService.enqueue(JobType.DAILY_ANALYSIS, { 
+        date: currentDate.toISOString().split('T')[0]
+      }, { priority: 1 });
       
       // Also queue prediction generation immediately after
       setTimeout(async () => {
-        await queueService.enqueue('generate_predictions', { 
-          analysisDate: currentDate.toISOString().split('T')[0],
-          timestamp: currentDate.getTime()
-        }, 1);
+        await queueService.enqueue(JobType.GENERATE_PREDICTIONS, { 
+          analysisDate: currentDate.toISOString().split('T')[0]
+        }, { priority: 1 });
       }, 30000); // Wait 30 seconds to let analysis complete
     });
 

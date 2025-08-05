@@ -6,14 +6,19 @@ import { OpenAIService } from '../services/ai/openai.service';
 import { Logger } from 'winston';
 import { queueService } from '../services/database/queue';
 import { aiAnalysisService } from '../services/ai/analysis';
+import { SmartUpdateService, UpdateStrategy, UpdateStrategies } from '../services/update/smart-update.service';
 
 export class AnalysisController {
+  private smartUpdater: SmartUpdateService;
+  
   constructor(
     private db: Database,
     private cache: CacheService,
     private aiService: OpenAIService,
     private logger: Logger
-  ) {}
+  ) {
+    this.smartUpdater = new SmartUpdateService(db, cache, logger);
+  }
 
   // Transform database row to DailyAnalysis interface with camelCase
   private transformDbRowToDailyAnalysis(row: any): any {
@@ -90,53 +95,97 @@ export class AnalysisController {
     }
   }
 
-  // Get single daily analysis
+  // Get single daily analysis with smart updates
   async getDailyAnalysis(req: Request, res: Response, next: NextFunction) {
     try {
       const { date } = req.params;
+      const { refresh = 'false' } = req.query;
+      const forceRefresh = refresh === 'true';
       
-      // Check cache first
       const cacheKey = `daily_analysis:${date}`;
-      const cached = await this.cache.get(cacheKey);
-      if (cached) {
-        return res.json({
-          success: true,
-          data: cached
-        });
-      }
+      const today = new Date().toISOString().split('T')[0];
+      const isToday = date === today;
       
-      const analysis = await this.db.tables.dailyAnalysis.findOne({
-        analysis_date: new Date(date)
-      });
-      
-      if (!analysis) {
-        return res.status(404).json({
-          success: false,
-          error: 'Analysis not found for this date'
-        });
-      }
-      
-      // Get associated predictions
-      const predictions = await this.db.query(
-        'SELECT * FROM predictions WHERE daily_analysis_id = $1 ORDER BY time_horizon',
-        [(analysis as any).id]
-      );
-      
-      // Transform both analysis and predictions to camelCase
-      const transformedAnalysis = this.transformDbRowToDailyAnalysis(analysis);
-      const transformedPredictions = predictions.map(row => this.transformDbRowToPrediction(row));
-      
-      const result = {
-        ...transformedAnalysis,
-        predictions: transformedPredictions
+      // Define update strategy based on date
+      const updateStrategy: UpdateStrategy = {
+        cacheFirst: true,
+        backgroundRefresh: isToday && !forceRefresh,
+        staleWhileRevalidate: isToday,
+        maxStaleAge: isToday ? 3600000 : 86400000, // 1 hour for today, 24 hours for historical
+        minRefreshInterval: 300000 // 5 minutes minimum between refreshes
       };
       
-      // Cache the result
-      await this.cache.set(cacheKey, result, { ttl: 3600 });
+      // Use the smart updater instance
+      
+      const fetchAnalysis = async () => {
+        const analysis = await this.db.tables.dailyAnalysis.findOne({
+          analysis_date: new Date(date)
+        });
+        
+        if (!analysis) {
+          // If today and no analysis exists, queue generation
+          if (isToday) {
+            await queueService.enqueue('daily_analysis', { date: new Date(date) }, 1);
+            return { generating: true, message: 'Analysis is being generated', date };
+          }
+          return null;
+        }
+        
+        // Get associated predictions
+        const predictions = await this.db.query(
+          'SELECT * FROM predictions WHERE daily_analysis_id = $1 ORDER BY time_horizon',
+          [(analysis as any).id]
+        );
+        
+        // Transform data
+        const transformedAnalysis = this.transformDbRowToDailyAnalysis(analysis);
+        const transformedPredictions = predictions.map(row => this.transformDbRowToPrediction(row));
+        
+        // Check if we need to refresh today's analysis
+        if (isToday && analysis) {
+          const analysisAge = Date.now() - new Date((analysis as any).created_at).getTime();
+          const needsRefresh = analysisAge > 14400000; // 4 hours
+          
+          if (needsRefresh) {
+            // Queue refresh in background
+            queueService.enqueue('daily_analysis', { 
+              date: new Date(date), 
+              force: true 
+            }, 2).catch(err => this.logger.error('Failed to queue analysis refresh', err));
+          }
+        }
+        
+        return {
+          ...transformedAnalysis,
+          predictions: transformedPredictions
+        };
+      };
+      
+      // Use smart update logic
+      const { data, isStale, updating } = await this.smartUpdater.getDataWithUpdate(
+        cacheKey,
+        fetchAnalysis,
+        forceRefresh ? { ...updateStrategy, backgroundRefresh: false } : updateStrategy
+      );
+      
+      if (!data || (data as any).generating) {
+        return res.status(data ? 202 : 404).json({
+          success: false,
+          error: data ? 'Analysis is being generated' : 'Analysis not found for this date',
+          generating: !!(data as any)?.generating,
+          date
+        });
+      }
       
       res.json({
         success: true,
-        data: result
+        data,
+        meta: {
+          cached: !updating && !forceRefresh,
+          stale: isStale,
+          updating,
+          nextUpdate: isToday ? new Date(Date.now() + 3600000).toISOString() : null
+        }
       });
     } catch (error) {
       next(error);

@@ -6,7 +6,20 @@ import { YouTubeProcessor } from './processors/youtube';
 import { APIProcessor } from './processors/api';
 import { MultiSourceProcessor } from './processors/multi-source';
 import { RedditProcessor } from './reddit.processor';
-import { queueService } from '../database/queue';
+import QueueService, { JobType } from '../queue/queue.service';
+import { DatabaseService } from '../database/db.service';
+import winston from 'winston';
+
+// Create queue service instance with deduplication
+const dbService = new DatabaseService(
+  { 
+    url: process.env.SUPABASE_URL || '', 
+    anonKey: process.env.SUPABASE_ANON_KEY || '',
+    serviceKey: process.env.SUPABASE_SERVICE_KEY || ''
+  },
+  logger as winston.Logger
+);
+const queueService = new QueueService(dbService, logger as winston.Logger);
 
 export interface FeedSource {
   id: string;
@@ -107,10 +120,10 @@ export async function processFeed(sourceId: string): Promise<void> {
         logger.error('Failed to insert raw feed', { error: insertError });
       } else if (!insertError) {
         // Queue for content processing
-        await queueService.enqueue('content_process', {
+        await queueService.enqueue(JobType.CONTENT_PROCESS, {
           sourceId: source.id,
           externalId: item.externalId
-        }, 3);
+        }, { priority: 3 });
       }
     }
 
@@ -141,9 +154,9 @@ export async function processAllActiveFeeds(): Promise<void> {
 
     // Queue all feeds for processing
     for (const source of sources || []) {
-      await queueService.enqueue('feed_fetch', {
+      await queueService.enqueue(JobType.FEED_FETCH, {
         sourceId: source.id
-      }, source.priority === 'high' ? 1 : source.priority === 'medium' ? 5 : 8);
+      }, { priority: source.priority === 'high' ? 1 : source.priority === 'medium' ? 5 : 8 });
     }
   } catch (error) {
     logger.error('Failed to process active feeds', { error });

@@ -149,8 +149,9 @@ class ScheduledFeedProcessor {
 }
 
 // Netlify Scheduled Function Handler
+// TEMPORARILY DISABLED - Deploy is in progress
 // This runs every 4 hours: at 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
-export const handler: Handler = schedule('0 */4 * * *', async (event) => {
+export const handler: Handler = schedule('0 0 31 2 *', async (event) => { // Never runs (Feb 31st)
   try {
     console.log('🕐 Running scheduled feed processing');
     

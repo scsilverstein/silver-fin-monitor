@@ -57,6 +57,140 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Mock queue status endpoint for sync status display (temporary for demo)
+router.get('/queue/status-demo', async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        isProcessing: Math.random() > 0.7, // 30% chance of processing
+        timestamp: new Date(),
+        stats: {
+          pending: Math.floor(Math.random() * 10),
+          processing: Math.floor(Math.random() * 3),
+          completed: Math.floor(Math.random() * 100) + 50,
+          failed: Math.floor(Math.random() * 5),
+          total: 0
+        },
+        jobs: [
+          {
+            id: '1',
+            job_type: 'feed_sync',
+            status: 'processing',
+            payload: { sourceId: 'feed-1' },
+            created_at: new Date(Date.now() - 5 * 60 * 1000) // 5 minutes ago
+          },
+          {
+            id: '2',
+            job_type: 'content_process',
+            status: 'pending',
+            payload: { feedId: 'feed-2' },
+            created_at: new Date(Date.now() - 2 * 60 * 1000) // 2 minutes ago
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+// Mock feeds endpoint for sync status display (temporary for demo)
+router.get('/feeds-demo', async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: [
+        {
+          id: 'feed-1',
+          name: 'CNBC Squawk Box',
+          type: 'podcast',
+          url: 'https://feeds.nbcuni.com/cnbc/podcast/squawk-box',
+          is_active: true,
+          lastProcessedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+          itemsProcessed: 45,
+          totalItems: 50
+        },
+        {
+          id: 'feed-2',
+          name: 'Bloomberg Surveillance',
+          type: 'podcast',
+          url: 'https://feeds.bloomberg.fm/surveillance',
+          is_active: true,
+          lastProcessedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30 minutes ago
+          itemsProcessed: 23,
+          totalItems: 25
+        },
+        {
+          id: 'feed-3',
+          name: 'Financial Times - Markets',
+          type: 'rss',
+          url: 'https://www.ft.com/markets?format=rss',
+          is_active: true,
+          lastProcessedAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(), // 15 minutes ago
+          itemsProcessed: 100,
+          totalItems: 100
+        },
+        {
+          id: 'feed-4',
+          name: 'All-In Podcast',
+          type: 'podcast',
+          url: 'https://feeds.megaphone.fm/all-in-with-chamath-jason-sacks-friedberg',
+          is_active: true,
+          lastProcessedAt: null, // Never synced
+          itemsProcessed: 0,
+          totalItems: 0
+        }
+      ]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+// Mock workflow status endpoint for sync status display (temporary for demo)
+router.get('/workflow/status/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const today = new Date().toISOString().split('T')[0];
+    
+    // 50% chance of having a workflow in progress
+    if (date === today && Math.random() > 0.5) {
+      res.json({
+        success: true,
+        data: {
+          date: date,
+          status: 'in_progress',
+          progress: {
+            feeds: { total: 4, completed: 2, failed: 0 },
+            content: { total: 50, processed: 25 },
+            analysis: 'pending',
+            predictions: 'not_started'
+          },
+          estimatedCompletion: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutes from now
+        }
+      });
+    } else {
+      // Return 404 for non-existent workflow
+      res.status(404).json({
+        success: false,
+        error: 'Workflow not found'
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
 // Test endpoint for debugging feeds issue (no auth for testing)
 // router.get('/test-feeds', testFeedsEndpoint);
 
