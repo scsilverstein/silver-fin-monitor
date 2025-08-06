@@ -6,7 +6,7 @@
   base = "/"
   
   # Build command - build Netlify function and frontend
-  command = "npx esbuild netlify/functions/api.ts --bundle --platform=node --outfile=netlify/functions/api.js && cd frontend && npm install && npm run build"
+  command = "./build.sh"
   
   # Directory that contains the deploy-ready files
   publish = "frontend/dist"
@@ -33,7 +33,7 @@
 
 # Build environment variables
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "20.11.1"
   NPM_VERSION = "10"
 
 # Headers
@@ -118,8 +118,6 @@
     # External dependencies
     external = ["aws-sdk"]
 
-  [functions."trigger-queue-worker"]
-      schedule = "*/5 * * * *"  # Every 5 minutes
 
   [functions."scheduled-feed-processing"]
     schedule = "0 */6 * * *"  # Every 6 hours
