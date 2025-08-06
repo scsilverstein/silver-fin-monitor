@@ -25,7 +25,7 @@ export async function testFeedCreation() {
     // First test: direct axios call
     console.log('\n1. Testing direct axios call...');
     const directResponse = await axios.post(
-      'http://localhost:3001/api/v1/feeds',
+      '/api/feeds',
       testData,
       {
         headers: {

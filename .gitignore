@@ -16,6 +16,9 @@ dist/
 build/
 coverage/
 
+# Archived code (temporary - can be committed if needed for reference)
+# archive/
+
 # TypeScript
 *.tsbuildinfo
 

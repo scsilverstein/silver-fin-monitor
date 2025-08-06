@@ -3006,6 +3006,268 @@ const handleRoute = async (event: HandlerEvent): Promise<any> => {
     }
   }
   
+  // Admin Health Endpoint
+  if (apiPath.includes('/admin/health') || apiPath === '/api/v1/admin/health') {
+    // Check authentication for admin endpoint
+    const authHeader = headers.authorization || headers.Authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return createResponse(401, {
+        success: false,
+        error: 'Authorization required'
+      });
+    }
+    
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: 'Database connection not configured'
+      });
+    }
+    
+    try {
+      // Test database connection
+      const { data: dbTest, error: dbError } = await supabase
+        .from('job_queue')
+        .select('count', { count: 'exact', head: true });
+      
+      // Get basic queue stats
+      const { data: queueStats } = await supabase.rpc('get_queue_stats');
+      
+      const health = {
+        status: dbError ? 'degraded' : 'healthy',
+        services: {
+          database: dbError ? 'degraded' : 'up',
+          cache: 'up', // Database-based cache
+          websocket: 'up', // Now polling-based
+          queue: queueStats && queueStats.length > 0 ? 'up' : 'degraded'
+        },
+        uptime: Math.floor(process.uptime()),
+        version: '1.0.0',
+        timestamp: new Date().toISOString()
+      };
+      
+      return createResponse(200, {
+        success: true,
+        data: health
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : 'Health check failed'
+      });
+    }
+  }
+  
+  // Admin Alerts Endpoint
+  if (apiPath.includes('/admin/alerts') || apiPath === '/api/v1/admin/alerts') {
+    // Check authentication for admin endpoint
+    const authHeader = headers.authorization || headers.Authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return createResponse(401, {
+        success: false,
+        error: 'Authorization required'
+      });
+    }
+    
+    // For now, return static alerts - in production this would come from a monitoring system
+    const alerts = [
+      {
+        id: '1',
+        type: 'system',
+        severity: 'info',
+        title: 'System Running Normally',
+        message: 'All services are operational',
+        timestamp: new Date(),
+        resolved: true
+      }
+    ];
+    
+    return createResponse(200, {
+      success: true,
+      data: alerts
+    });
+  }
+  
+  // Admin Metrics Endpoint
+  if (apiPath.includes('/admin/metrics') || apiPath === '/api/v1/admin/metrics') {
+    // Check authentication for admin endpoint
+    const authHeader = headers.authorization || headers.Authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return createResponse(401, {
+        success: false,
+        error: 'Authorization required'
+      });
+    }
+    
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: 'Database connection not configured'
+      });
+    }
+    
+    try {
+      // Get queue stats
+      const { data: queueStats } = await supabase.rpc('get_queue_stats');
+      
+      // Get active jobs count
+      const { count: activeJobs } = await supabase
+        .from('job_queue')
+        .select('count', { count: 'exact', head: true })
+        .eq('status', 'processing');
+      
+      // Get pending jobs count
+      const { count: queueSize } = await supabase
+        .from('job_queue')
+        .select('count', { count: 'exact', head: true })
+        .eq('status', 'pending');
+      
+      const metrics = {
+        cpuUsage: Math.random() * 20 + 10, // Simulated - in production use actual metrics
+        memoryUsage: Math.random() * 30 + 40, // Simulated
+        activeJobs: activeJobs || 0,
+        queueSize: queueSize || 0,
+        uptime: Math.floor(process.uptime())
+      };
+      
+      return createResponse(200, {
+        success: true,
+        data: metrics
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch metrics'
+      });
+    }
+  }
+  
+  // Admin Backfill Status Endpoint
+  if (apiPath.includes('/admin/backfill-status') || apiPath === '/api/v1/admin/backfill-status') {
+    // Check authentication for admin endpoint
+    const authHeader = headers.authorization || headers.Authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return createResponse(401, {
+        success: false,
+        error: 'Authorization required'
+      });
+    }
+    
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: 'Database connection not configured'
+      });
+    }
+    
+    try {
+      // Get total analyses count
+      const { count: totalAnalyses } = await supabase
+        .from('daily_analysis')
+        .select('count', { count: 'exact', head: true });
+      
+      // Get oldest and newest content dates
+      const { data: contentRange } = await supabase
+        .from('processed_content')
+        .select('created_at')
+        .order('created_at', { ascending: true })
+        .limit(1);
+      
+      const { data: newestContent } = await supabase
+        .from('processed_content')
+        .select('created_at')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      // Get analyzed dates
+      const { data: analyzedDates } = await supabase
+        .from('daily_analysis')
+        .select('analysis_date')
+        .order('analysis_date', { ascending: false })
+        .limit(30); // Last 30 days
+      
+      // Calculate approximate total days with content (simplified)
+      const oldestDate = contentRange?.[0]?.created_at;
+      const newestDate = newestContent?.[0]?.created_at;
+      const totalDaysWithContent = oldestDate && newestDate ? 
+        Math.ceil((new Date(newestDate).getTime() - new Date(oldestDate).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+      
+      const coverage = totalDaysWithContent > 0 ? 
+        `${((totalAnalyses || 0) / totalDaysWithContent * 100).toFixed(1)}%` : '0%';
+      
+      const backfillStatus = {
+        totalAnalyses: totalAnalyses || 0,
+        oldestContent: oldestDate || null,
+        newestContent: newestDate || null,
+        totalDaysWithContent,
+        analyzedDates: analyzedDates?.map(d => d.analysis_date) || [],
+        coverage
+      };
+      
+      return createResponse(200, {
+        success: true,
+        data: backfillStatus
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch backfill status'
+      });
+    }
+  }
+  
+  // Admin Backfill Analysis Endpoint
+  if ((apiPath.includes('/admin/backfill-analysis') || apiPath === '/api/v1/admin/backfill-analysis') && httpMethod === 'POST') {
+    // Check authentication for admin endpoint
+    const authHeader = headers.authorization || headers.Authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return createResponse(401, {
+        success: false,
+        error: 'Authorization required'
+      });
+    }
+    
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: 'Database connection not configured'
+      });
+    }
+    
+    try {
+      // Queue a job to generate analysis for missing dates
+      const { data: jobId, error: jobError } = await supabase.rpc('enqueue_job', {
+        job_type: 'backfill_analysis',
+        payload: { 
+          initiated_by: 'admin',
+          timestamp: new Date().toISOString()
+        },
+        priority: 2
+      });
+      
+      if (jobError) throw jobError;
+      
+      return createResponse(200, {
+        success: true,
+        message: 'Backfill analysis job queued successfully',
+        data: {
+          jobId,
+          status: 'queued'
+        }
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to start backfill analysis'
+      });
+    }
+  }
+  
   
   // List all available endpoints
   if (apiPath === '/api/v1' || apiPath === '/') {

@@ -23,6 +23,8 @@ import {
   Shield,
   Target,
   Lightbulb,
+  Map,
+  Zap,
 } from 'lucide-react';
 
 interface NavItem {
@@ -96,6 +98,12 @@ const navigation: NavItem[] = [
     badge: 'New',
   },
   {
+    label: 'Market Map',
+    href: '/market-map',
+    icon: Map,
+    badge: 'New',
+  },
+  {
     label: 'Insights',
     href: '/insights',
     icon: BarChart3,
@@ -114,6 +122,12 @@ const navigation: NavItem[] = [
 ];
 
 const bottomNavigation: NavItem[] = [
+  {
+    label: 'Process Control',
+    href: '/process-control',
+    icon: Zap,
+    badge: 'New',
+  },
   {
     label: 'Admin',
     href: '/admin',

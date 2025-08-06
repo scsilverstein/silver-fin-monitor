@@ -194,7 +194,7 @@ test.describe('Silver Fin Monitor - Complete Workflow Tests', () => {
         // Make API call directly to trigger analysis
         const response = await page.evaluate(async () => {
           try {
-            const res = await fetch('/api/v1/analysis/generate', {
+            const res = await fetch('/api/analysis/generate', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',

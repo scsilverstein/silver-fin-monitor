@@ -505,3 +505,157 @@ export async function getTopMovers(req: Request, res: Response) {
     });
   }
 }
+
+// Get market map data for treemap visualization
+export async function getMarketMapData(req: Request, res: Response) {
+  try {
+    const { index = 'sp500', size } = req.query;
+    
+    // Cache key for market map data
+    const cacheKey = `market_map_${index}_${size || 'all'}`;
+    
+    // Try to get from cache first
+    const cachedData = await cache.get(cacheKey);
+    if (cachedData) {
+      return res.json({
+        success: true,
+        data: cachedData,
+        cached: true
+      });
+    }
+    
+    let query = db
+      .from('stock_symbols')
+      .select(`
+        symbol,
+        name,
+        sector,
+        industry,
+        market_cap_category,
+        exchange,
+        is_active
+      `)
+      .eq('is_active', true)
+      .order('symbol', { ascending: true });
+    
+    // Filter by index
+    if (index === 'sp500') {
+      // Assuming we have a way to identify S&P 500 stocks
+      // This could be through a separate table or a field
+      query = query.in('exchange', ['NYSE', 'NASDAQ']);
+    } else if (index === 'nasdaq') {
+      query = query.eq('exchange', 'NASDAQ');
+    } else if (index === 'dow') {
+      query = query.eq('exchange', 'NYSE');
+    }
+    
+    // Filter by market cap size
+    if (size === 'small') {
+      query = query.in('market_cap_category', ['micro', 'small']);
+    } else if (size === 'medium') {
+      query = query.eq('market_cap_category', 'mid');
+    } else if (size === 'large') {
+      query = query.in('market_cap_category', ['large', 'mega']);
+    }
+    
+    const { data: symbols, error: symbolsError } = await query;
+    
+    if (symbolsError) {
+      throw symbolsError;
+    }
+    
+    if (!symbols || symbols.length === 0) {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+    
+    // Get latest market data for these symbols
+    const symbolList = symbols.map(s => s.symbol);
+    const { data: marketData, error: marketError } = await db
+      .from('market_data_daily')
+      .select(`
+        symbol,
+        price,
+        change_amount,
+        change_percent,
+        volume,
+        market_cap,
+        updated_at
+      `)
+      .in('symbol', symbolList)
+      .order('updated_at', { ascending: false });
+    
+    if (marketError) {
+      logger.warn('Market data not available, using mock data', marketError);
+    }
+    
+    // Create a map of market data by symbol
+    const marketDataMap = new Map();
+    if (marketData) {
+      marketData.forEach(data => {
+        marketDataMap.set(data.symbol, data);
+      });
+    }
+    
+    // Generate mock market cap data if not available
+    const generateMockMarketCap = (category: string) => {
+      const ranges = {
+        'mega': [200000, 3000000], // 200B - 3T
+        'large': [10000, 200000],  // 10B - 200B
+        'mid': [2000, 10000],      // 2B - 10B
+        'small': [300, 2000],      // 300M - 2B
+        'micro': [50, 300]         // 50M - 300M
+      };
+      const range = ranges[category as keyof typeof ranges] || ranges.large;
+      return Math.floor(Math.random() * (range[1] - range[0]) + range[0]);
+    };
+    
+    // Generate mock price change data
+    const generateMockChange = () => {
+      const change = (Math.random() - 0.5) * 10; // -5% to +5%
+      const price = 50 + Math.random() * 400; // $50 - $450
+      return {
+        price: Number(price.toFixed(2)),
+        change: Number((price * change / 100).toFixed(2)),
+        changePercent: Number(change.toFixed(2)),
+        volume: Math.floor(Math.random() * 50000000) + 1000000
+      };
+    };
+    
+    // Combine symbol data with market data
+    const combinedData = symbols.map(symbol => {
+      const market = marketDataMap.get(symbol.symbol);
+      const mockData = generateMockChange();
+      
+      return {
+        symbol: symbol.symbol,
+        name: symbol.name,
+        sector: symbol.sector || 'Unknown',
+        industry: symbol.industry || 'Unknown',
+        marketCap: market?.market_cap || generateMockMarketCap(symbol.market_cap_category || 'large'),
+        price: market?.price || mockData.price,
+        change: market?.change_amount || mockData.change,
+        changePercent: market?.change_percent || mockData.changePercent,
+        volume: market?.volume || mockData.volume,
+        exchange: symbol.exchange || 'UNKNOWN'
+      };
+    });
+    
+    // Cache the result for 5 minutes
+    await cache.set(cacheKey, combinedData, 300);
+    
+    res.json({
+      success: true,
+      data: combinedData
+    });
+    
+  } catch (error) {
+    logger.error('Failed to get market map data', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve market map data'
+    });
+  }
+}

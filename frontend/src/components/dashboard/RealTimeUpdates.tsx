@@ -77,14 +77,24 @@ export const RealTimeUpdates: React.FC = () => {
     setUpdates(prev => [update, ...prev].slice(0, 50));
   });
   
-  // Monitor connection status
+  // Monitor connection status (polling-based)
   useEffect(() => {
-    const checkConnection = setInterval(() => {
-      // This would check the actual WebSocket connection status
-      setIsConnected(true); // Placeholder
-    }, 5000);
+    setIsConnected(true); // Always connected for polling-based updates
     
-    return () => clearInterval(checkConnection);
+    // Optional: Add API health check for more accurate status
+    const checkHealth = async () => {
+      try {
+        // Could add a health check API call here
+        setIsConnected(true);
+      } catch (error) {
+        setIsConnected(false);
+      }
+    };
+    
+    checkHealth();
+    const interval = setInterval(checkHealth, 60000); // Check every minute
+    
+    return () => clearInterval(interval);
   }, []);
   
   const getStatusIcon = (status: Update['status']) => {

@@ -12,6 +12,7 @@ interface StockState {
   scannerResults: ScannerResult[];
   alerts: StockAlert[];
   peerComparison: any | null;
+  marketMapData: any[];
   loading: boolean;
   error: string | null;
   filters: {
@@ -34,6 +35,7 @@ interface StockState {
   addToWatchlist: (symbol: string) => Promise<void>;
   removeFromWatchlist: (symbol: string) => Promise<void>;
   runScanner: () => Promise<void>;
+  fetchMarketMapData: (index?: string, size?: string) => Promise<void>;
   setFilters: (filters: StockState['filters']) => void;
   clearError: () => void;
 }
@@ -48,6 +50,7 @@ export const useStockStore = create<StockState>()(
       scannerResults: [],
       alerts: [],
       peerComparison: null,
+      marketMapData: [],
       loading: false,
       error: null,
       filters: {
@@ -254,6 +257,27 @@ export const useStockStore = create<StockState>()(
             loading: false 
           });
           throw error;
+        }
+      },
+
+      // Fetch market map data
+      fetchMarketMapData: async (index = 'sp500', size) => {
+        set({ loading: true, error: null });
+        try {
+          const params: any = { index };
+          if (size) {
+            params.size = size;
+          }
+          
+          const response = await api.get('/stocks/market-map', { params });
+          if (response.data.success) {
+            set({ marketMapData: response.data.data, loading: false });
+          }
+        } catch (error: any) {
+          set({ 
+            error: error.response?.data?.error || 'Failed to fetch market map data', 
+            loading: false 
+          });
         }
       },
 

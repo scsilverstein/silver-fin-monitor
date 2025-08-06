@@ -27,6 +27,8 @@ import { StockScannerPage } from '@/pages/StockScannerPage';
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import QueueTest from '@/pages/QueueTest';
 import QueueDebug from '@/pages/QueueDebug';
+import MarketMapPage from '@/pages/MarketMapPage';
+import { ProcessControl } from '@/pages/ProcessControl';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -213,6 +215,17 @@ export const AppRoutes: React.FC = () => {
       />
       
       <Route
+        path="/market-map"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <MarketMapPage />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
         path="/queue"
         element={
           <ProtectedRoute>
@@ -273,6 +286,17 @@ export const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <ModernLayout>
               <AdminDashboard />
+            </ModernLayout>
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
+        path="/process-control"
+        element={
+          <ProtectedRoute>
+            <ModernLayout>
+              <ProcessControl />
             </ModernLayout>
           </ProtectedRoute>
         }

@@ -1,105 +1,53 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { websocketService, WebSocketEvent } from '../services/websocket.service';
-import { useAuthStore } from '../store/auth.store';
+// DEPRECATED: WebSocket functionality replaced with polling
+// This file is kept for backward compatibility but redirects to polling
+
+import { usePolling, UsePollingOptions } from './usePolling';
 
 export interface UseWebSocketOptions {
   autoConnect?: boolean;
   channels?: string[];
+  interval?: number;
 }
 
+// Legacy WebSocket hook that now uses polling for compatibility
 export const useWebSocket = (options: UseWebSocketOptions = {}) => {
-  const { autoConnect = true, channels = [] } = options;
-  const { isAuthenticated } = useAuthStore();
-  const unsubscribesRef = useRef<(() => void)[]>([]);
+  console.warn('useWebSocket is deprecated. Use usePolling instead for better serverless compatibility.');
   
-  useEffect(() => {
-    if (autoConnect && isAuthenticated && !websocketService.isConnected()) {
-      websocketService.connect();
-    }
-    
-    return () => {
-      // Clean up all event listeners
-      unsubscribesRef.current.forEach(unsubscribe => unsubscribe());
-      unsubscribesRef.current = [];
-    };
-  }, [autoConnect, isAuthenticated]);
+  // Mock WebSocket interface with polling under the hood
+  const subscribe = (channels: string[]) => {
+    console.warn('WebSocket subscribe() called but not implemented. Use usePolling directly.');
+  };
   
-  useEffect(() => {
-    if (channels.length > 0 && websocketService.isConnected()) {
-      websocketService.subscribe(channels);
-      
-      return () => {
-        websocketService.unsubscribe(channels);
-      };
-    }
-  }, [channels]);
+  const unsubscribe = (channels: string[]) => {
+    console.warn('WebSocket unsubscribe() called but not implemented.');
+  };
   
-  const on = useCallback(<T = any>(
-    event: WebSocketEvent,
-    callback: (data: T) => void
-  ): void => {
-    const unsubscribe = websocketService.on(event, callback);
-    unsubscribesRef.current.push(unsubscribe);
-  }, []);
-  
-  const subscribe = useCallback((newChannels: string[]) => {
-    websocketService.subscribe(newChannels);
-  }, []);
-  
-  const unsubscribe = useCallback((channelsToRemove: string[]) => {
-    websocketService.unsubscribe(channelsToRemove);
-  }, []);
+  const on = (event: string, callback: (data: any) => void) => {
+    console.warn('WebSocket on() called but not implemented. Use usePolling directly.');
+  };
   
   return {
     on,
     subscribe,
     unsubscribe,
-    isConnected: websocketService.isConnected()
+    isConnected: false // Always false since we don't use WebSockets
   };
 };
 
-// Specialized hooks for specific features
+// Replace specialized WebSocket hooks with polling equivalents
 
 export const useFeedUpdates = (onUpdate: (data: any) => void) => {
-  const ws = useWebSocket();
-  
-  useEffect(() => {
-    const unsubscribe = websocketService.onFeedProcessingUpdate(onUpdate);
-    return unsubscribe;
-  }, [onUpdate]);
-  
-  return ws;
+  return usePolling('/feeds', onUpdate, { interval: 120000 }); // 2 minutes
 };
 
 export const useAnalysisUpdates = (onUpdate: (data: any) => void) => {
-  const ws = useWebSocket();
-  
-  useEffect(() => {
-    const unsubscribe = websocketService.onAnalysisUpdate(onUpdate);
-    return unsubscribe;
-  }, [onUpdate]);
-  
-  return ws;
+  return usePolling('/analysis', onUpdate, { interval: 120000 }); // 2 minutes
 };
 
 export const useStockAlerts = (onAlert: (alert: any) => void) => {
-  const ws = useWebSocket({ channels: ['stock:alerts'] });
-  
-  useEffect(() => {
-    const unsubscribe = websocketService.onStockAlert(onAlert);
-    return unsubscribe;
-  }, [onAlert]);
-  
-  return ws;
+  return usePolling('/stocks/alerts', onAlert, { interval: 60000 }); // 1 minute
 };
 
 export const useSystemMetrics = (onMetrics: (metrics: any) => void) => {
-  const ws = useWebSocket();
-  
-  useEffect(() => {
-    const unsubscribe = websocketService.onSystemMetrics(onMetrics);
-    return unsubscribe;
-  }, [onMetrics]);
-  
-  return ws;
+  return usePolling('/system/metrics', onMetrics, { interval: 30000 }); // 30 seconds
 };

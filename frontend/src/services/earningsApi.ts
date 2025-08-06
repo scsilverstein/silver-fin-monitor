@@ -16,8 +16,17 @@ export interface EarningsCalendarEntry {
   reporting_status: 'reported' | 'missed' | 'scheduled';
 }
 
-// Use Netlify functions API endpoint directly
-const API_BASE_URL = 'http://localhost:8888/.netlify/functions/api';
+// Use dynamic API endpoint based on environment
+const getApiBaseUrl = () => {
+  // In production, use relative path to Netlify functions
+  if (import.meta.env.PROD || window.location.hostname !== 'localhost') {
+    return '/.netlify/functions/api';
+  }
+  // In development, use configured URL or default localhost
+  return import.meta.env.VITE_API_URL || 'http://localhost:8888/.netlify/functions/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export const earningsApi = {
   async getEarningsCalendarMonth(year: number, month: number) {

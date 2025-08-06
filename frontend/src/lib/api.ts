@@ -9,21 +9,21 @@ const getApiUrl = () => {
   
   // In development, use the Vite proxy
   if (import.meta.env.DEV) {
-    return '/api/v1';
+    return '/api';
   }
   
   // In production, check deployment environment
   if (window.location.hostname.includes('netlify.app') || window.location.hostname.includes('netlify.com')) {
-    return '/api/v1';
+    return '/api';
   }
   
   // Default production fallback
   if (import.meta.env.PROD) {
-    return '/api/v1';
+    return '/api';
   }
   
   // Final fallback to local server
-  return 'http://localhost:3001/api/v1';
+  return 'http://localhost:3001/api';
 };
 
 const API_BASE_URL = getApiUrl();
@@ -1022,7 +1022,7 @@ export const entityAnalyticsApi = {
   getDashboardData: async (): Promise<EntityDashboardData> => {
     try {
       // Use Netlify function endpoint
-      const response = await api.get<ApiResponse<EntityDashboardData>>('/api/v1/entity-analytics/dashboard');
+      const response = await api.get<ApiResponse<EntityDashboardData>>('/entity-analytics/dashboard');
       const data = response.data.data!;
       
       // If no data found, provide a helpful empty state
@@ -1053,7 +1053,7 @@ export const entityAnalyticsApi = {
   getEntityAnalytics: async (entityName: string): Promise<EntityAnalytics> => {
     try {
       // Use Netlify function endpoint
-      const response = await api.get<ApiResponse<EntityAnalytics>>(`/api/v1/entity-analytics/entity/${encodeURIComponent(entityName)}`);
+      const response = await api.get<ApiResponse<EntityAnalytics>>(`/entity-analytics/entity/${encodeURIComponent(entityName)}`);
       return response.data.data!;
     } catch (error) {
       console.error(`Entity analytics API failed for ${entityName}:`, error);
@@ -1064,7 +1064,7 @@ export const entityAnalyticsApi = {
   getEntityMentions: async (entityName: string, limit: number = 20, offset: number = 0) => {
     try {
       // Use Netlify function endpoint
-      const response = await api.get(`/api/v1/entity-analytics/entity/${encodeURIComponent(entityName)}/mentions`, {
+      const response = await api.get(`/entity-analytics/entity/${encodeURIComponent(entityName)}/mentions`, {
         params: { limit, offset }
       });
       return response.data.data || { mentions: [], total: 0 };
@@ -1078,7 +1078,7 @@ export const entityAnalyticsApi = {
   searchEntities: async (query: string, limit: number = 10) => {
     try {
       // Use Netlify function endpoint
-      const response = await api.get('/api/v1/entity-analytics/search', {
+      const response = await api.get('/entity-analytics/search', {
         params: { q: query, limit }
       });
       return response.data.data || [];

@@ -1,6 +1,7 @@
 import React from 'react';
 import { FeatureCard } from '@/components/ui/ModernCard';
-import { Brain, Sparkles, Target, Globe } from 'lucide-react';
+import { Brain, Sparkles, Target, Globe, Zap } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface QuickActionsProps {
   generatingAnalysis: boolean;
@@ -17,6 +18,8 @@ export const DashboardQuickActions: React.FC<QuickActionsProps> = ({
   onGeneratePredictions,
   onDebugPredictions
 }) => {
+  const navigate = useNavigate();
+  
   const quickActions = [
     {
       title: 'Generate Analysis',
@@ -39,12 +42,12 @@ export const DashboardQuickActions: React.FC<QuickActionsProps> = ({
       },
     },
     {
-      title: 'Debug Predictions',
-      description: 'Debug prediction loading issues',
-      icon: <Target className="h-5 w-5 text-orange-500" />,
+      title: 'Process Control',
+      description: 'Manually trigger system processes',
+      icon: <Zap className="h-5 w-5 text-yellow-500" />,
       action: { 
-        label: 'Debug', 
-        onClick: onDebugPredictions,
+        label: 'Control', 
+        onClick: () => navigate('/process-control'),
         disabled: false
       },
     },
@@ -54,7 +57,7 @@ export const DashboardQuickActions: React.FC<QuickActionsProps> = ({
       icon: <Globe className="h-5 w-5 text-primary" />,
       action: { 
         label: 'Manage', 
-        onClick: () => window.location.href = '/feeds' 
+        onClick: () => navigate('/feeds')
       },
     },
   ];

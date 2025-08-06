@@ -3,6 +3,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
 import { EventEmitter } from 'events';
+import { config } from '@/config';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -84,7 +85,11 @@ class WebSocketService extends EventEmitter {
         return next(new Error('Authentication required'));
       }
       
-      const payload = jwt.verify(token, process.env.JWT_SECRET!) as any;
+      if (!config.jwt.secret) {
+        return next(new Error('JWT secret not configured'));
+      }
+      
+      const payload = jwt.verify(token, config.jwt.secret) as any;
       socket.userId = payload.sub;
       socket.role = payload.role;
       

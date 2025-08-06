@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { RealTimeUpdates } from '@/components/dashboard/RealTimeUpdates';
-import { useSystemMetrics } from '@/hooks/useWebSocket';
+import { usePolling } from '@/hooks/usePolling';
 import { formatDate } from '@/lib/utils';
 import {
   Activity,
@@ -86,10 +86,12 @@ export const AdminDashboard: React.FC = () => {
     uptime: 0
   });
   
-  // Subscribe to system metrics
-  useSystemMetrics((newMetrics) => {
-    setMetrics(newMetrics);
-  });
+  // Subscribe to system metrics via polling
+  usePolling('/api/admin/metrics', (newMetrics) => {
+    if (newMetrics && newMetrics.success) {
+      setMetrics(newMetrics.data);
+    }
+  }, { interval: 5000 }); // Poll every 5 seconds
   
   useEffect(() => {
     // Fetch initial system data
@@ -109,7 +111,7 @@ export const AdminDashboard: React.FC = () => {
   
   const fetchSystemHealth = async () => {
     try {
-      const response = await fetch('/api/v1/admin/health');
+      const response = await fetch('/api/admin/health');
       const data = await response.json();
       setSystemHealth(data);
     } catch (error) {
@@ -119,7 +121,7 @@ export const AdminDashboard: React.FC = () => {
   
   const fetchQueueStats = async () => {
     try {
-      const response = await fetch('/api/v1/queue/stats');
+      const response = await fetch('/api/queue/stats');
       const data = await response.json();
       setQueueStats(data);
     } catch (error) {
@@ -129,7 +131,7 @@ export const AdminDashboard: React.FC = () => {
   
   const fetchAlerts = async () => {
     try {
-      const response = await fetch('/api/v1/admin/alerts');
+      const response = await fetch('/api/admin/alerts');
       const data = await response.json();
       setAlerts(data.slice(0, 10)); // Show latest 10 alerts
     } catch (error) {

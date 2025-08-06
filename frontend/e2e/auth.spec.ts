@@ -65,7 +65,7 @@ test.describe('Authentication Flow', () => {
     await page.click('text=Use Demo Account');
 
     // Intercept login request to delay it
-    await page.route('**/api/v1/auth/login', async route => {
+    await page.route('**/api/auth/login', async route => {
       await new Promise(resolve => setTimeout(resolve, 1000));
       await route.continue();
     });

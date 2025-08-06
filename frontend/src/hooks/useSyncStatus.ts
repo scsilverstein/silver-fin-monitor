@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
-import { useWebSocket } from './useWebSocket';
-import { websocketService } from '../services/websocket.service';
+import { useDashboardPolling } from './usePolling';
 
 export interface FeedSyncStatus {
   feedId: string;
@@ -43,8 +42,8 @@ export const useSyncStatus = (refreshInterval = 5000) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // WebSocket for real-time updates
-  const { isConnected, on } = useWebSocket({ channels: ['sync:updates', 'workflow:updates'] });
+  // Polling for updates (replaces WebSocket)
+  const isConnected = true; // Always connected for polling
 
   // Fetch sync status from API
   const fetchSyncStatus = useCallback(async () => {
@@ -146,77 +145,7 @@ export const useSyncStatus = (refreshInterval = 5000) => {
     }
   }, []);
 
-  // Handle WebSocket messages
-  useEffect(() => {
-    // Subscribe to feed sync updates
-    const unsubscribeFeedSync = websocketService.on('feed:sync:update', (data: any) => {
-      setSyncStatus(prev => ({
-        ...prev,
-        feeds: prev.feeds.map(feed => 
-          feed.feedId === data.feedId 
-            ? { ...feed, ...data.update }
-            : feed
-        ),
-        lastUpdated: new Date()
-      }));
-    });
-
-    // Subscribe to workflow updates
-    const unsubscribeWorkflow = websocketService.on('workflow:update', (data: any) => {
-      setSyncStatus(prev => ({
-        ...prev,
-        workflow: data.workflow,
-        lastUpdated: new Date()
-      }));
-    });
-
-    // Subscribe to sync started events
-    const unsubscribeSyncStarted = websocketService.on('sync:started', (data: any) => {
-      setSyncStatus(prev => ({
-        ...prev,
-        isAnySyncing: true,
-        syncingCount: prev.syncingCount + 1,
-        feeds: prev.feeds.map(feed => 
-          feed.feedId === data.feedId 
-            ? { ...feed, status: 'syncing' }
-            : feed
-        ),
-        lastUpdated: new Date()
-      }));
-    });
-
-    // Subscribe to sync completed events
-    const unsubscribeSyncCompleted = websocketService.on('sync:completed', (data: any) => {
-      setSyncStatus(prev => {
-        const newSyncingCount = Math.max(0, prev.syncingCount - 1);
-        return {
-          ...prev,
-          isAnySyncing: newSyncingCount > 0,
-          syncingCount: newSyncingCount,
-          feeds: prev.feeds.map(feed => 
-            feed.feedId === data.feedId 
-              ? { 
-                  ...feed, 
-                  status: 'completed',
-                  lastSyncAt: new Date().toISOString(),
-                  itemsProcessed: data.itemsProcessed,
-                  totalItems: data.totalItems
-                }
-              : feed
-          ),
-          lastUpdated: new Date()
-        };
-      });
-    });
-
-    // Cleanup
-    return () => {
-      unsubscribeFeedSync();
-      unsubscribeWorkflow();
-      unsubscribeSyncStarted();
-      unsubscribeSyncCompleted();
-    };
-  }, []);
+  // Polling replaces WebSocket - updates happen through periodic fetchSyncStatus calls
 
   // Initial fetch
   useEffect(() => {

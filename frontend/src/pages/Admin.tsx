@@ -34,7 +34,7 @@ export const Admin: React.FC = () => {
 
   const fetchBackfillStatus = async () => {
     try {
-      const response = await fetch('/api/v1/admin/backfill-status', {
+      const response = await fetch('/api/admin/backfill-status', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
@@ -68,7 +68,7 @@ export const Admin: React.FC = () => {
     setMessage(null);
 
     try {
-      const response = await fetch('/api/v1/admin/backfill-analysis', {
+      const response = await fetch('/api/admin/backfill-analysis', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,

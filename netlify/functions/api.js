@@ -17370,6 +17370,191 @@ var handleRoute = async (event) => {
       });
     }
   }
+  if (apiPath.includes("/admin/health") || apiPath === "/api/v1/admin/health") {
+    const authHeader = headers.authorization || headers.Authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return createResponse(401, {
+        success: false,
+        error: "Authorization required"
+      });
+    }
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: "Database connection not configured"
+      });
+    }
+    try {
+      const { data: dbTest, error: dbError } = await supabase.from("job_queue").select("count", { count: "exact", head: true });
+      const { data: queueStats } = await supabase.rpc("get_queue_stats");
+      const health = {
+        status: dbError ? "degraded" : "healthy",
+        services: {
+          database: dbError ? "degraded" : "up",
+          cache: "up",
+          // Database-based cache
+          websocket: "up",
+          // Now polling-based
+          queue: queueStats && queueStats.length > 0 ? "up" : "degraded"
+        },
+        uptime: Math.floor(process.uptime()),
+        version: "1.0.0",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      return createResponse(200, {
+        success: true,
+        data: health
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : "Health check failed"
+      });
+    }
+  }
+  if (apiPath.includes("/admin/alerts") || apiPath === "/api/v1/admin/alerts") {
+    const authHeader = headers.authorization || headers.Authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return createResponse(401, {
+        success: false,
+        error: "Authorization required"
+      });
+    }
+    const alerts = [
+      {
+        id: "1",
+        type: "system",
+        severity: "info",
+        title: "System Running Normally",
+        message: "All services are operational",
+        timestamp: /* @__PURE__ */ new Date(),
+        resolved: true
+      }
+    ];
+    return createResponse(200, {
+      success: true,
+      data: alerts
+    });
+  }
+  if (apiPath.includes("/admin/metrics") || apiPath === "/api/v1/admin/metrics") {
+    const authHeader = headers.authorization || headers.Authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return createResponse(401, {
+        success: false,
+        error: "Authorization required"
+      });
+    }
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: "Database connection not configured"
+      });
+    }
+    try {
+      const { data: queueStats } = await supabase.rpc("get_queue_stats");
+      const { count: activeJobs } = await supabase.from("job_queue").select("count", { count: "exact", head: true }).eq("status", "processing");
+      const { count: queueSize } = await supabase.from("job_queue").select("count", { count: "exact", head: true }).eq("status", "pending");
+      const metrics = {
+        cpuUsage: Math.random() * 20 + 10,
+        // Simulated - in production use actual metrics
+        memoryUsage: Math.random() * 30 + 40,
+        // Simulated
+        activeJobs: activeJobs || 0,
+        queueSize: queueSize || 0,
+        uptime: Math.floor(process.uptime())
+      };
+      return createResponse(200, {
+        success: true,
+        data: metrics
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to fetch metrics"
+      });
+    }
+  }
+  if (apiPath.includes("/admin/backfill-status") || apiPath === "/api/v1/admin/backfill-status") {
+    const authHeader = headers.authorization || headers.Authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return createResponse(401, {
+        success: false,
+        error: "Authorization required"
+      });
+    }
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: "Database connection not configured"
+      });
+    }
+    try {
+      const { count: totalAnalyses } = await supabase.from("daily_analysis").select("count", { count: "exact", head: true });
+      const { data: contentRange } = await supabase.from("processed_content").select("created_at").order("created_at", { ascending: true }).limit(1);
+      const { data: newestContent } = await supabase.from("processed_content").select("created_at").order("created_at", { ascending: false }).limit(1);
+      const { data: analyzedDates } = await supabase.from("daily_analysis").select("analysis_date").order("analysis_date", { ascending: false }).limit(30);
+      const oldestDate = contentRange?.[0]?.created_at;
+      const newestDate = newestContent?.[0]?.created_at;
+      const totalDaysWithContent = oldestDate && newestDate ? Math.ceil((new Date(newestDate).getTime() - new Date(oldestDate).getTime()) / (1e3 * 60 * 60 * 24)) : 0;
+      const coverage = totalDaysWithContent > 0 ? `${((totalAnalyses || 0) / totalDaysWithContent * 100).toFixed(1)}%` : "0%";
+      const backfillStatus = {
+        totalAnalyses: totalAnalyses || 0,
+        oldestContent: oldestDate || null,
+        newestContent: newestDate || null,
+        totalDaysWithContent,
+        analyzedDates: analyzedDates?.map((d) => d.analysis_date) || [],
+        coverage
+      };
+      return createResponse(200, {
+        success: true,
+        data: backfillStatus
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to fetch backfill status"
+      });
+    }
+  }
+  if ((apiPath.includes("/admin/backfill-analysis") || apiPath === "/api/v1/admin/backfill-analysis") && httpMethod === "POST") {
+    const authHeader = headers.authorization || headers.Authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return createResponse(401, {
+        success: false,
+        error: "Authorization required"
+      });
+    }
+    if (!supabase) {
+      return createResponse(500, {
+        success: false,
+        error: "Database connection not configured"
+      });
+    }
+    try {
+      const { data: jobId, error: jobError } = await supabase.rpc("enqueue_job", {
+        job_type: "backfill_analysis",
+        payload: {
+          initiated_by: "admin",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        priority: 2
+      });
+      if (jobError) throw jobError;
+      return createResponse(200, {
+        success: true,
+        message: "Backfill analysis job queued successfully",
+        data: {
+          jobId,
+          status: "queued"
+        }
+      });
+    } catch (error) {
+      return createResponse(500, {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to start backfill analysis"
+      });
+    }
+  }
   if (apiPath === "/api/v1" || apiPath === "/") {
     return createResponse(200, {
       success: true,

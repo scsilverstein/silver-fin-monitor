@@ -9,7 +9,8 @@ import {
   getPeerComparison,
   getWatchlist,
   addToWatchlist,
-  getTopMovers
+  getTopMovers,
+  getMarketMapData
 } from '@/controllers/stock.controller';
 import { authenticateToken as authenticate } from '@/middleware/auth';
 import { validateRequest } from '@/middleware/validation';
@@ -114,6 +115,15 @@ router.get('/top-movers',
   query('limit').optional().isInt({ min: 1, max: 50 }),
   validateRequest,
   getTopMovers
+);
+
+// Market map data
+router.get('/market-map',
+  authenticate,
+  query('index').optional().isIn(['sp500', 'nasdaq', 'dow']),
+  query('size').optional().isIn(['small', 'medium', 'large']),
+  validateRequest,
+  getMarketMapData
 );
 
 export default router;
