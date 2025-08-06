@@ -7,7 +7,10 @@ npx esbuild netlify/functions/api.ts --bundle --platform=node --outfile=netlify/
 echo "Installing frontend dependencies..."
 cd frontend
 rm -rf node_modules
-npm install
+npm install --include=dev
+
+echo "Checking installed packages..."
+ls -la node_modules/@vitejs/ || echo "@vitejs not found"
 
 echo "Building frontend..."
 npm run build
