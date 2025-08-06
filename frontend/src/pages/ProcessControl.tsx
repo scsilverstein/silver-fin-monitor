@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   feedsApi, 
   analysisApi, 
@@ -40,6 +40,7 @@ interface ProcessStatus {
 }
 
 export const ProcessControl: React.FC = () => {
+  const queryClient = useQueryClient();
   const [processStatuses, setProcessStatuses] = useState<Record<string, ProcessStatus>>({});
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [daysBack, setDaysBack] = useState(7);
@@ -229,6 +230,26 @@ export const ProcessControl: React.FC = () => {
     },
     onError: (error, status) => {
       toast.error(`Failed to clear ${status} jobs`);
+    }
+  });
+
+  const processQueueJobsMutation = useMutation({
+    mutationFn: async (maxJobs: number = 20) => {
+      const response = await fetch('/.netlify/functions/process-queue-jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxJobs })
+      });
+      if (!response.ok) throw new Error('Failed to process queue jobs');
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast.success(`Processed ${data.data?.processed || 0} jobs`);
+      // Refetch queue stats
+      queryClient.invalidateQueries({ queryKey: ['queue-stats'] });
+    },
+    onError: (error) => {
+      toast.error('Failed to process queue jobs');
     }
   });
 
@@ -530,7 +551,30 @@ export const ProcessControl: React.FC = () => {
           <CardTitle>Queue Management</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
+            {/* Process Jobs */}
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium">Process Jobs</h4>
+              <ModernButton
+                size="sm"
+                variant="primary"
+                onClick={() => processQueueJobsMutation.mutate(20)}
+                disabled={processQueueJobsMutation.isPending || (queueStats?.currentQueue?.pending || 0) === 0}
+              >
+                {processQueueJobsMutation.isPending ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" />
+                    Process {Math.min(queueStats?.currentQueue?.pending || 0, 20)} Jobs
+                  </>
+                )}
+              </ModernButton>
+            </div>
+
             {/* Worker Control */}
             <div className="space-y-2">
               <h4 className="text-sm font-medium">Worker Control</h4>

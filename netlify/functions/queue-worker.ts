@@ -465,20 +465,36 @@ class QueueWorker {
   }
   
   /**
-   * Store feed items in database
+   * Store feed items in database and queue for content processing
    */
   private async storeFeedItems(items: any[]): Promise<void> {
     for (const item of items) {
       try {
-        const { error } = await supabase
+        const { data: insertedFeed, error } = await supabase
           .from('raw_feeds')
           .upsert(item, {
             onConflict: 'source_id,external_id',
             ignoreDuplicates: true
-          });
+          })
+          .select('id')
+          .single();
           
         if (error) {
           console.error('Error storing feed item:', error);
+        } else if (insertedFeed) {
+          // Queue for content processing
+          const { error: queueError } = await supabase.rpc('enqueue_job', {
+            job_type: 'content_process',
+            payload: { rawFeedId: insertedFeed.id },
+            priority: 5,
+            delay_seconds: 0
+          });
+          
+          if (queueError) {
+            console.error('Error queuing content_process job:', queueError);
+          } else {
+            console.log(`✅ Queued content_process job for feed ${insertedFeed.id}`);
+          }
         }
       } catch (error) {
         console.error('Error in storeFeedItems:', error);
@@ -622,8 +638,138 @@ class QueueWorker {
    * Process content processing job
    */
   private async processContent(payload: any): Promise<any> {
-    // Placeholder for content processing
-    return { message: 'Content processing not yet implemented' };
+    const { rawFeedId } = payload;
+    
+    if (!rawFeedId) {
+      throw new Error('rawFeedId is required for content processing');
+    }
+    
+    console.log(`🔄 Processing content for raw feed ${rawFeedId}`);
+    
+    // Get the raw feed
+    const { data: rawFeed, error: fetchError } = await supabase
+      .from('raw_feeds')
+      .select('*')
+      .eq('id', rawFeedId)
+      .single();
+    
+    if (fetchError || !rawFeed) {
+      throw new Error(`Raw feed not found: ${rawFeedId}`);
+    }
+    
+    // Simple content processing
+    const content = rawFeed.content || rawFeed.description || rawFeed.title || '';
+    
+    // Basic sentiment analysis
+    const sentiment = this.analyzeSentiment(content);
+    
+    // Extract topics
+    const topics = this.extractTopics(content);
+    
+    // Store processed content
+    const { data: processed, error: insertError } = await supabase
+      .from('processed_content')
+      .insert({
+        raw_feed_id: rawFeedId,
+        processed_text: content,
+        key_topics: topics,
+        sentiment_score: sentiment,
+        entities: {},
+        summary: content.substring(0, 500),
+        processing_metadata: {
+          processor: 'netlify-queue-worker',
+          version: '1.0'
+        }
+      })
+      .select()
+      .single();
+    
+    if (insertError) {
+      throw new Error(`Failed to store processed content: ${insertError.message}`);
+    }
+    
+    // Update raw feed status
+    await supabase
+      .from('raw_feeds')
+      .update({ processing_status: 'completed' })
+      .eq('id', rawFeedId);
+    
+    console.log(`✅ Content processed for feed ${rawFeedId}`);
+    
+    // Check if we should trigger analysis
+    await this.checkAndTriggerAnalysis();
+    
+    return {
+      processedId: processed.id,
+      sentiment,
+      topics: topics.length,
+      rawFeedId
+    };
+  }
+  
+  private analyzeSentiment(text: string): number {
+    const positive = ['good', 'great', 'excellent', 'positive', 'up', 'gain', 'growth', 'bullish', 'strong'];
+    const negative = ['bad', 'poor', 'negative', 'down', 'loss', 'decline', 'bearish', 'weak'];
+    
+    const lower = text.toLowerCase();
+    let score = 0;
+    
+    positive.forEach(word => {
+      if (lower.includes(word)) score += 0.1;
+    });
+    
+    negative.forEach(word => {
+      if (lower.includes(word)) score -= 0.1;
+    });
+    
+    return Math.max(-1, Math.min(1, score));
+  }
+  
+  private extractTopics(text: string): string[] {
+    const topics: string[] = [];
+    const keywords = ['market', 'stock', 'economy', 'inflation', 'tech', 'earnings', 'fed', 'rate', 'crypto', 'ai'];
+    
+    const lower = text.toLowerCase();
+    keywords.forEach(keyword => {
+      if (lower.includes(keyword)) {
+        topics.push(keyword);
+      }
+    });
+    
+    return topics.slice(0, 5);
+  }
+  
+  private async checkAndTriggerAnalysis(): Promise<void> {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Count recent processed content
+    const { count } = await supabase
+      .from('processed_content')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString());
+    
+    if (count && count >= 5) {
+      // Check if analysis already exists for today
+      const { data: existing } = await supabase
+        .from('daily_analysis')
+        .select('id')
+        .eq('analysis_date', today)
+        .single();
+      
+      if (!existing) {
+        // Queue daily analysis
+        const { error } = await supabase.rpc('enqueue_job', {
+          job_type: 'daily_analysis',
+          payload: { date: today },
+          priority: 2,
+          delay_seconds: 60 // Wait a minute to let more content process
+        });
+        
+        if (!error) {
+          console.log('📊 Queued daily analysis after content processing');
+        }
+      }
+    }
   }
   
   /**
