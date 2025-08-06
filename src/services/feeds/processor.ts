@@ -103,7 +103,7 @@ export async function processFeed(sourceId: string): Promise<void> {
 
     // Save raw feeds
     for (const item of newItems) {
-      const { error: insertError } = await supabase
+      const { data: insertedFeed, error: insertError } = await supabase
         .from('raw_feeds')
         .insert({
           source_id: source.id,
@@ -114,15 +114,16 @@ export async function processFeed(sourceId: string): Promise<void> {
           external_id: item.externalId,
           metadata: item.metadata,
           processing_status: 'pending'
-        });
+        })
+        .select('id')
+        .single();
 
       if (insertError && !insertError.message.includes('duplicate')) {
         logger.error('Failed to insert raw feed', { error: insertError });
-      } else if (!insertError) {
-        // Queue for content processing
+      } else if (!insertError && insertedFeed) {
+        // Queue for content processing with the raw feed ID
         await queueService.enqueue(JobType.CONTENT_PROCESS, {
-          sourceId: source.id,
-          externalId: item.externalId
+          rawFeedId: insertedFeed.id
         }, { priority: 2 });
       }
     }
