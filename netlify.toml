@@ -5,8 +5,8 @@
   # Directory to change to before starting a build
   base = "/"
   
-  # Build command - build Netlify function and frontend
-  command = "./build.sh"
+  # Build command - only build Netlify functions (frontend is pre-built)
+  command = "npx esbuild netlify/functions/api.ts --bundle --platform=node --outfile=netlify/functions/api.js"
   
   # Directory that contains the deploy-ready files
   publish = "frontend/dist"
